@@ -495,11 +495,11 @@ const server = http.createServer((req, res) => {
       if (!creds) {
         return sendJson(res, 409, { error: '尚未配置 AWS 凭证：请先在「设置」页填写并保存' });
       }
-      opLog(req.user, 'AWS ' + payload.action + ' region=' + region + ' 账号=' + (payload.group || creds.name));
       const region = payload.region || creds.region;
       if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) {
         return sendJson(res, 400, { error: '区域格式不正确' });
       }
+      opLog(req.user, 'AWS ' + payload.action + ' region=' + region + ' 账号=' + (payload.group || creds.name));
       let signed;
       try {
         signed = signAwsJson(payload.action, payload.params || {}, creds, region);
