@@ -47,6 +47,7 @@ const ROOT = __dirname;
 const LEGACY_CREDS_FILE = process.env.CREDS_FILE || path.join(ROOT, 'aws-credentials.json');
 const LEGACY_OCI_FILE = process.env.OCI_CREDS_FILE || path.join(ROOT, 'oci-credentials.json');
 // 数据目录：账号库 / 会话 / 按账号隔离的凭证都存这里（容器部署时挂 /data）
+const APP_VERSION = '202609100314'; // 每次发布更新：YYYYMMDDHHMM
 const DATA_DIR = process.env.DATA_DIR || (process.env.CREDS_FILE ? path.dirname(process.env.CREDS_FILE) : ROOT);
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -446,6 +447,11 @@ const server = http.createServer((req, res) => {
   }
 
   const urlPath0 = req.url.split('?')[0];
+
+  // ---- 版本号 ----
+  if (req.method === 'GET' && urlPath0 === '/api/version') {
+    return sendJson(res, 200, { version: APP_VERSION });
+  }
 
   // ---- 账号：注册（已关闭，使用内置默认账号 admin）----
   if (req.method === 'POST' && urlPath0 === '/api/auth/register') {

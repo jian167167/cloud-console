@@ -118,6 +118,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .nav-item:hover { background: var(--surface); color: var(--text); text-decoration: none; }
 .nav-item.active { background: var(--accent-soft); color: var(--accent-hover); border-color: rgba(255, 153, 0, 0.25); }
 .sidebar-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-3); }
+.app-ver { margin-top: 8px; font-size: 11px; color: var(--text-3); opacity: .72; user-select: none; }
 .creds-status { display: flex; align-items: center; gap: 8px; }
 .creds-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 .creds-status.ok .dot { background: var(--ok); }
@@ -485,6 +486,7 @@ select.input { cursor: pointer; }
         <span class="dot"></span>
         <span class="label" id="creds-label">凭证未配置</span>
       </div>
+      <div class="app-ver" id="app-ver"></div>
     </div>
   </aside>
 
@@ -1243,6 +1245,11 @@ function updateCredsBadge() {
 /* ============================================================
    UI 基础：Toast / Modal / 错误框
    ============================================================ */
+fetch('/api/version').then(function (r) { return r.json(); }).then(function (d) {
+  var v = document.getElementById('app-ver');
+  if (v && d && d.version) v.textContent = 'v' + d.version;
+}).catch(function () { /* noop */ });
+
 const ICONS = {
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>',
   err: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>',
