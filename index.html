@@ -2083,7 +2083,44 @@ async function renderSettings() {
         <div id="set-migrate-result"></div>
       </div>` : ''}
 
+    <div class="form-card" style="max-width:640px">
+      <h3>AWS 凭证（支持多个账号）</h3>
+      <div class="field full" style="margin-bottom:12px">
+        <label>当前凭证</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select class="input" id="set-group" style="flex:1;min-width:180px">
+            ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
+          </select>
+          <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建凭证</button>
+          ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前凭证</button>' : ''}
         </div>
+        <div class="tip" style="margin-top:6px">切换下拉即切换当前使用的 AWS 账号；每个凭证独立保存。编辑已有凭证时 AK/SK 留空 = 保持不变。</div>
+      </div>
+      <div class="form-grid">
+        <div class="field full">
+          <label>凭证名称 <span class="tip">（填新名字保存 = 新建一个凭证；与现有凭证同名 = 更新该凭证）</span></label>
+          <input class="input" id="set-name" value="${esc(c.active || '')}" placeholder="如：美西-A、公司生产" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field full">
+          <label>Access Key ID</label>
+          <input class="input mono" id="set-ak" placeholder="AKIA..." autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field full">
+          <label>Secret Access Key</label>
+          <div style="display:flex;gap:8px">
+            <input class="input mono" id="set-sk" type="password" placeholder="••••••••" autocomplete="off" spellcheck="false" style="flex:1">
+            <button class="btn btn-ghost" id="set-sk-toggle" type="button" title="显示 / 隐藏">显示</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-accent" id="set-save-test">保存到本机并测试连接</button>
+        <button class="btn" id="set-save">仅保存</button>
+        ${c.configured ? '<button class="btn btn-danger" id="set-clear">清除凭证</button>' : ''}
+      </div>
+      <div id="set-result"></div>
+    </div>
+
 
     <div class="info-box" style="max-width:640px">
       <b>如何获取凭证：</b><br>
