@@ -430,6 +430,12 @@ select.input { cursor: pointer; }
         设置
       </a>
     </nav>
+    <div class="nav" style="margin-top:6px">
+      <a class="nav-item" id="nav-telegram" href="javascript:void(0)" title="Telegram 操作通知（实例操作 / 面板登录提醒）">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M21.94 4.16a1.5 1.5 0 0 0-2.05-1.28L2.9 9.62c-1.23.49-1.16 2.2.1 2.58l4.3 1.29 1.6 5.13c.36 1.16 1.82 1.37 2.5.36l2.03-3.02 4.02 2.95c.97.71 2.36.25 2.6-.9l2.9-13.06c.09-.42.01-.66 0-.79zM9.2 13.1l8.1-5.08c.36-.23.76.22.47.53l-6.2 6.68-.6 2.6-1.77-4.73z"/></svg>
+        电报机器人
+      </a>
+    </div>
     <div class="sidebar-foot">
       <div class="creds-status" id="creds-status">
         <span class="dot"></span>
@@ -634,16 +640,36 @@ var Auth = (function () {
     }
   }
 
+  async function detectPublicIp() {
+    var urls = ['https://api.ipify.org', 'https://icanhazip.com', 'https://ip.sb'];
+    var race = new Promise(function (resolve) { setTimeout(function () { resolve(''); }, 3000); });
+    var first = Promise.race(urls.map(function (u) {
+      return new Promise(function (resolve) {
+        var ctl = new AbortController();
+        var timer = setTimeout(function () { ctl.abort(); }, 2600);
+        fetch(u, { signal: ctl.signal }).then(function (r) {
+          if (!r.ok) throw new Error('bad');
+          return r.text();
+        }).then(function (txt) {
+          var s = String(txt || '').trim();
+          resolve(/^[0-9a-fA-F:.]+$/.test(s) ? s : '');
+        }).catch(function () { resolve(''); }).finally(function () { clearTimeout(timer); });
+      });
+    }));
+    return Promise.race([first, race]);
+  }
+
   async function login() {
     var u = el('auth-user').value.trim();
     var p = el('auth-pass').value;
     if (!u || !p) return authMsg('请输入账号和密码');
     authMsg('');
     try {
+      var clientIp = await detectPublicIp();
       var r = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password: p })
+        body: JSON.stringify({ username: u, password: p, clientIp: clientIp })
       });
       var d = await r.json().catch(function () { return {}; });
       if (r.ok && d.ok) return afterLogin(d.user);
@@ -690,6 +716,64 @@ var Auth = (function () {
   async function init() {
     el('atab-login').addEventListener('click', function () { switchTab('login'); });
     el('atab-register').addEventListener('click', function () { switchTab('register'); });
+  /* ---------- 电报机器人通知 ---------- */
+  function tgApiUrl(path) { return (location.protocol === 'file:' ? 'http://localhost:8080' : '') + path; }
+
+  function openTelegramModal() {
+    var root = $q('#modal-root');
+    root.innerHTML = '' +
+      '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal" style="width:560px;max-width:94vw" role="dialog">' +
+      '<h3>📨 电报机器人通知</h3>' +
+      '<div class="msg" style="margin-top:10px">' +
+      '<label>机器人 Token（@BotFather 创建机器人后获取）<input id="tg-token" type="text" placeholder="123456:ABC-DEF..."></label>' +
+      '<label>接收 Chat ID（私聊机器人后 @userinfobot 可查）<input id="tg-chat" type="text" placeholder="-1001234567890"></label>' +
+      '<label>API 地址（默认官方；无法直连时可填反代域名）<input id="tg-base" type="text" placeholder="api.telegram.org"></label>' +
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input id="tg-enabled" type="checkbox" style="width:auto"> 启用通知（实例操作 / 面板登录提醒）</label>' +
+      '</div>' +
+      '<div id="tg-result" style="min-height:18px;margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>' +
+      '<div class="actions">' +
+      '<button class="btn" data-close="1">关闭</button>' +
+      '<button id="tg-save" class="btn">仅保存</button>' +
+      '<button id="tg-save-test" class="btn btn-accent">保存并发送测试</button>' +
+      '</div>' +
+      '</div>';
+    root.classList.add('show');
+
+    fetch(tgApiUrl('/api/telegram'), { method: 'GET' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.bot_token_tail) root.querySelector('#tg-token').placeholder = '已保存 ' + d.bot_token_tail + '（留空保持不变）';
+        root.querySelector('#tg-chat').value = (d && d.chat_id) || '';
+        root.querySelector('#tg-base').value = (d && d.api_base) || 'api.telegram.org';
+        root.querySelector('#tg-enabled').checked = !!(d && d.enabled);
+      })
+      .catch(function () { /* 保持默认 */ });
+
+    function doTgSave(test) {
+      var box = root.querySelector('#tg-result');
+      box.textContent = '保存中…';
+      fetch(tgApiUrl('/api/telegram'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bot_token: root.querySelector('#tg-token').value.trim(),
+          chat_id: root.querySelector('#tg-chat').value.trim(),
+          api_base: root.querySelector('#tg-base').value.trim(),
+          enabled: root.querySelector('#tg-enabled').checked,
+          test: !!test
+        })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        box.textContent = (d && d.message) || (d && d.ok ? '已保存' : '保存失败');
+        box.style.color = (d && d.ok) ? '' : 'var(--warn)';
+      }).catch(function (e) { box.textContent = '保存失败：' + e.message; box.style.color = 'var(--warn)'; });
+    }
+    root.querySelector('#tg-save').addEventListener('click', function () { doTgSave(false); });
+    root.querySelector('#tg-save-test').addEventListener('click', function () { doTgSave(true); });
+  }
+
+  $q('#nav-telegram').addEventListener('click', openTelegramModal);
+
     el('btn-auth-login').addEventListener('click', login);
     el('btn-auth-register').addEventListener('click', register);
     el('btn-logout').addEventListener('click', logout);

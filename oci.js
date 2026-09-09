@@ -14,6 +14,8 @@
 
 'use strict';
 
+const tgNotify = require('./telegram');
+
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -386,6 +388,12 @@ async function getPrimaryPrivateIpId(computeHost, cfg, vnicId) {
   return prim ? prim.id : null;
 }
 
+/* ---------------- Telegram 通知辅助 ---------------- */
+function tgActionLabel(action) {
+  const map = { START: '开机', STOP: '关机', SOFTSTOP: '软关机', SOFTRESET: '软重启', RESET: '重启' };
+  return map[action] || action;
+}
+
 /* ---------------- 路由处理 ---------------- */
 
 /** 统一入口：由 server.js 调用。urlPath 不含 query。 */
@@ -529,6 +537,8 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
           urlPath: '/20160918/instances/' + encodeURIComponent(instId) + '?action=' + action,
         }, cfg).then((r) => {
           const st = (r.json && r.json.lifecycleState) || '?';
+          tgNotify.notify(req.user,
+            '☁️ 甲骨文 OCI · ' + tgActionLabel(action) + '通知\n区域：' + cfg.region + '\n实例：' + instId + '\n结果：成功（' + st + '）\n时间：' + tgNotify.fmtNow());
           return sendJson(res, 200, { ok: true, action: action, state: st });
         }).catch((e) => sendJson(res, 200, { ok: false, message: '操作失败：' + e.message }));
       });
@@ -536,8 +546,13 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
     }
 
     if (op === 'switch-ip' && method === 'POST') {
-      switchIp(cfg, instId).then((r) => sendJson(res, 200, r))
-        .catch((e) => sendJson(res, 200, { ok: false, message: '更换 IP 失败：' + e.message }));
+      switchIp(cfg, instId).then((r) => {
+        if (r && r.ok) {
+          tgNotify.notify(req.user,
+            '🔄 甲骨文 OCI · 更换公网 IP 通知\n区域：' + cfg.region + '\n实例：' + instId + '\n旧 IP：' + (r.old_ip || '无') + '\n新 IP：' + (r.new_ip || '?') + '\n时间：' + tgNotify.fmtNow());
+        }
+        return sendJson(res, 200, r);
+      }).catch((e) => sendJson(res, 200, { ok: false, message: '更换 IP 失败：' + e.message }));
       return;
     }
 
@@ -547,8 +562,14 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
       req.on('end', () => {
         let data = {};
         try { data = JSON.parse(raw) || {}; } catch (e) { /* ignore */ }
-        openPorts(cfg, instId, data).then((r) => sendJson(res, 200, r))
-          .catch((e) => sendJson(res, 200, { ok: false, message: (e.kind === 'param' ? '参数错误：' : '开放端口失败：') + e.message }));
+        openPorts(cfg, instId, data).then((r) => {
+          if (r && r.ok) {
+            const p = (r.ports || []).map((x) => x.port + '/' + x.protocol).join(', ') || (data && data.ports ? JSON.stringify(data.ports) : '?');
+            tgNotify.notify(req.user,
+              '🔓 甲骨文 OCI · 开放端口通知\n区域：' + cfg.region + '\n实例：' + instId + '\n端口：' + p + '\n时间：' + tgNotify.fmtNow());
+          }
+          return sendJson(res, 200, r);
+        }).catch((e) => sendJson(res, 200, { ok: false, message: (e.kind === 'param' ? '参数错误：' : '开放端口失败：') + e.message }));
       });
       return;
     }

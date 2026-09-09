@@ -51,6 +51,22 @@ const DATA_DIR = process.env.DATA_DIR || (process.env.CREDS_FILE ? path.dirname(
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const ociBackend = require('./oci');
+const tgNotify = require('./telegram');
+tgNotify.setDataDir(DATA_DIR);
+
+/* ---------------- Telegram 通知辅助 ---------------- */
+function getClientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  if (fwd) return fwd;
+  return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+}
+const NOTIFY_AWS_ACTIONS = {
+  StartInstance: '开机',
+  StopInstance: '关机',
+  RebootInstance: '重启',
+  OpenInstancePublicPorts: '开放端口',
+  DeleteInstance: '删除实例',
+};
 
 /* ---------------- 操作日志（内存环形，重启清空） ---------------- */
 const OP_LOG_MAX = 300;
@@ -365,6 +381,9 @@ const server = http.createServer((req, res) => {
       const token = createSession(username);
       setSessionCookie(res, token);
       opLog(username, '登录');
+      const loginIp = String(payload.clientIp || '').trim() || getClientIp(req);
+      tgNotify.notify(username,
+        '🔐 面板登录提醒\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码并检查端口转发！');
       return sendJson(res, 200, { ok: true, user: username });
     });
     return;
@@ -401,6 +420,44 @@ const server = http.createServer((req, res) => {
   }
 
   // ---- 操作日志 ----
+  if (req.method === 'GET' && urlPath0 === '/api/telegram') {
+    const tc = tgNotify.load(req.user);
+    return sendJson(res, 200, {
+      enabled: tc.enabled,
+      bot_token_tail: tgNotify.safeTail(tc.bot_token),
+      chat_id: tc.chat_id,
+      api_base: tc.api_base,
+      configured: !!(tc.bot_token && tc.chat_id),
+    });
+  }
+
+  if (req.method === 'POST' && urlPath0 === '/api/telegram') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      try {
+        tgNotify.save(req.user, payload);
+      } catch (e) {
+        return sendJson(res, 400, { error: e.message });
+      }
+      opLog(req.user, '保存电报通知配置');
+      if (payload.test) {
+        tgNotify.notify(req.user,
+          '✅ 电报通知测试成功\n账号：' + req.user + '\n时间：' + tgNotify.fmtNow() + '\n\n今后实例操作与面板登录提醒都会发送到这里。',
+          (err, code, body) => {
+            if (err) return sendJson(res, 200, { ok: true, saved: true, test: false, message: '已保存，但测试消息发送失败：' + err.message + '（请检查 Token / Chat ID / 网络能否访问 Telegram）' });
+            if (code !== 200) return sendJson(res, 200, { ok: true, saved: true, test: false, message: '已保存，但 Telegram 拒绝了测试消息（HTTP ' + code + '）：' + String(body || '').slice(0, 220) });
+            return sendJson(res, 200, { ok: true, saved: true, test: true, message: '已保存，测试消息发送成功 ✓' });
+          }, true);
+        return;
+      }
+      return sendJson(res, 200, { ok: true, saved: true, message: '电报通知配置已保存' });
+    });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath0 === '/api/logs') {
     return sendJson(res, 200, { logs: opLogs.slice(-OP_LOG_MAX) });
   }
@@ -519,6 +576,11 @@ const server = http.createServer((req, res) => {
         let data = '';
         upRes.on('data', (chunk) => { data += chunk; });
         upRes.on('end', () => {
+          if (NOTIFY_AWS_ACTIONS[payload.action] && (upRes.statusCode || 500) === 200) {
+            const inst = (payload.params && payload.params.instanceName) || '';
+            tgNotify.notify(req.user,
+              '🖥️ AWS 光帆 · ' + NOTIFY_AWS_ACTIONS[payload.action] + '通知\n账号：' + (payload.group || creds.name) + '\n区域：' + region + '\n实例：' + inst + '\n结果：成功\n时间：' + tgNotify.fmtNow());
+          }
           sendJson(res, 200, {
             status: upRes.statusCode || 500,
             headers: upRes.headers,
