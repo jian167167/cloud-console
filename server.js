@@ -498,7 +498,8 @@ const server = http.createServer((req, res) => {
       opLog(username, '登录');
       const loginIp = String(payload.clientIp || '').trim() || getClientIp(req);
       tgNotify.notify(username,
-        '🔐 面板登录提醒\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码并检查端口转发！');
+        '🔐 面板登录提醒\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码并检查端口转发！',
+        null, true);
       return sendJson(res, 200, { ok: true, user: username });
     });
     return;
@@ -545,7 +546,8 @@ const server = http.createServer((req, res) => {
       opLog(username, '登录（二次验证通过）');
       const loginIp = String(payload.clientIp || '').trim() || getClientIp(req);
       tgNotify.notify(username,
-        '✅ 二次验证通过，登录成功\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码！');
+        '✅ 二次验证通过，登录成功\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码！',
+        null, true);
       return sendJson(res, 200, { ok: true, user: username });
     });
     return;
