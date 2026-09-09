@@ -474,6 +474,10 @@ select.input { cursor: pointer; }
         <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M21.94 4.16a1.5 1.5 0 0 0-2.05-1.28L2.9 9.62c-1.23.49-1.16 2.2.1 2.58l4.3 1.29 1.6 5.13c.36 1.16 1.82 1.37 2.5.36l2.03-3.02 4.02 2.95c.97.71 2.36.25 2.6-.9l2.9-13.06c.09-.42.01-.66 0-.79zM9.2 13.1l8.1-5.08c.36-.23.76.22.47.53l-6.2 6.68-.6 2.6-1.77-4.73z"/></svg>
         电报机器人
       </a>
+      <a class="nav-item" id="nav-backup" href="javascript:void(0)" title="数据备份 / 恢复（导出导入全部配置）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        数据备份
+      </a>
     </div>
     <div class="sidebar-foot">
       <div class="creds-status" id="creds-status">
@@ -595,16 +599,7 @@ select.input { cursor: pointer; }
             </div>
           </div>
 
-          <div class="form-card" style="margin-top:14px">
-            <h3>数据备份 / 恢复</h3>
-            <div class="oci-tip" style="margin-bottom:10px">备份包含<b>全部</b>内容：登录账号、AWS 光帆凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同账号密码，请妥善保管。</b>重装容器后导入即可全部恢复。</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-accent" id="oci-backup-export" type="button">⬇ 导出备份</button>
-              <button class="btn" id="oci-backup-import" type="button">⬆ 导入恢复</button>
-              <input type="file" id="oci-backup-file" accept=".json,application/json" style="display:none">
-            </div>
-            <div id="oci-backup-result" style="margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>
-          </div>
+                    </div>
         </div>
       </div>
     </div>
@@ -823,6 +818,28 @@ var Auth = (function () {
   }
 
   document.querySelector('#nav-telegram').addEventListener('click', openTelegramModal);
+
+  function openBackupModal() {
+    var root = document.querySelector('#modal-root');
+    root.innerHTML = '' +
+      '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal" style="width:560px;max-width:94vw" role="dialog">' +
+      '<h3>📦 数据备份 / 恢复</h3>' +
+      '<div class="msg" style="margin-top:10px">' +
+      '<p style="margin:0 0 8px;font-size:13px;color:var(--text-2)">导出包含<b>全部</b>内容：登录账号、AWS 光帆凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同账号密码，请妥善保管、切勿外传。</b>重装容器后导入即可全部恢复，无需重新配置。</p>' +
+      '</div>' +
+      '<div id="bk-result" style="min-height:18px;margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>' +
+      '<div class="actions">' +
+      '<button class="btn" data-close="1">关闭</button>' +
+      '<button id="bk-import" class="btn">⬆ 导入恢复</button>' +
+      '<button id="bk-export" class="btn btn-accent">⬇ 导出备份</button>' +
+      '<input type="file" id="bk-file" accept=".json,application/json" style="display:none">' +
+      '</div>' +
+      '</div>';
+    root.classList.add('show');
+    bindBackupCard(root.querySelector('#bk-export'), root.querySelector('#bk-import'), root.querySelector('#bk-file'), root.querySelector('#bk-result'));
+  }
+  document.querySelector('#nav-backup').addEventListener('click', openBackupModal);
 
     el('btn-auth-login').addEventListener('click', login);
     el('btn-auth-register').addEventListener('click', register);
@@ -1993,56 +2010,7 @@ async function renderSettings() {
         <div id="set-migrate-result"></div>
       </div>` : ''}
 
-    <div class="form-card" style="max-width:640px">
-      <h3>AWS 凭证（支持多个账号）</h3>
-      <div class="field full" style="margin-bottom:12px">
-        <label>当前凭证</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <select class="input" id="set-group" style="flex:1;min-width:180px">
-            ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
-          </select>
-          <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建凭证</button>
-          ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前凭证</button>' : ''}
         </div>
-        <div class="tip" style="margin-top:6px">切换下拉即切换当前使用的 AWS 账号；每个凭证独立保存。编辑已有凭证时 AK/SK 留空 = 保持不变。</div>
-      </div>
-      <div class="form-grid">
-        <div class="field full">
-          <label>凭证名称 <span class="tip">（填新名字保存 = 新建一个凭证；与现有凭证同名 = 更新该凭证）</span></label>
-          <input class="input" id="set-name" value="${esc(c.active || '')}" placeholder="如：美西-A、公司生产" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field full">
-          <label>Access Key ID</label>
-          <input class="input mono" id="set-ak" placeholder="AKIA..." autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field full">
-          <label>Secret Access Key</label>
-          <div style="display:flex;gap:8px">
-            <input class="input mono" id="set-sk" type="password" placeholder="••••••••" autocomplete="off" spellcheck="false" style="flex:1">
-            <button class="btn btn-ghost" id="set-sk-toggle" type="button" title="显示 / 隐藏">显示</button>
-          </div>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-accent" id="set-save-test">保存到本机并测试连接</button>
-        <button class="btn" id="set-save">仅保存</button>
-        ${c.configured ? '<button class="btn btn-danger" id="set-clear">清除凭证</button>' : ''}
-      </div>
-      <div id="set-result"></div>
-    </div>
-
-    <div class="form-card" style="max-width:640px">
-      <h3>数据备份 / 恢复</h3>
-      <div class="tip" style="margin-bottom:10px">
-        导出包含：登录账号、AWS 凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同你的账号密码，请妥善保管、切勿外传。</b>重装容器后，在设置页导入即可全部恢复，无需重新配置。
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-accent" id="set-backup-export" type="button">⬇ 导出备份</button>
-        <button class="btn" id="set-backup-import" type="button">⬆ 导入恢复</button>
-        <input type="file" id="set-backup-file" accept=".json,application/json" style="display:none">
-      </div>
-      <div id="set-backup-result" style="margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>
-    </div>
 
     <div class="info-box" style="max-width:640px">
       <b>如何获取凭证：</b><br>
@@ -2052,9 +2020,6 @@ async function renderSettings() {
       <b>安全提示：</b>凭证保存在本机 <code>aws-lightsail-panel/aws-credentials.json</code>，签名由本地代理完成；浏览器不再持有密钥。请勿把该文件、页面截图或 AK/SK 发给任何人。若密钥曾泄露（例如出现在截图/聊天中），请到 AWS 控制台删除并重建。
     </div>
   `;
-
-  // ---- 数据备份：导出 / 恢复（全量：AWS 光帆 + 甲骨文 OCI + 电报 + 账号）----
-  bindBackupCard($('#set-backup-export'), $('#set-backup-import'), $('#set-backup-file'), $('#set-backup-result'));
 
   const migrateBtn = $('#set-migrate');
   if (migrateBtn && legacy) {
@@ -3091,7 +3056,6 @@ window.OciPanel = (function () {
   function init() {
     if (inited) return;
     inited = true;
-    bindBackupCard($q('#oci-backup-export'), $q('#oci-backup-import'), $q('#oci-backup-file'), $q('#oci-backup-result'));
     loadSettings();
     loadInstances();
     startTimer();
