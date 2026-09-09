@@ -1,0 +1,25 @@
+services:
+  cloud-console:
+    image: node:20-slim
+    container_name: cloud-console
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    volumes:
+      - ../:/app:ro
+      - ./data:/data
+      - deps:/app/node_modules
+    environment:
+      - PORT=8080
+      - ALLOW_LAN=1
+      - DATA_DIR=/data
+      - CREDS_FILE=/data/aws-credentials.json
+      - OCI_CREDS_FILE=/data/oci-credentials.json
+      - SSH_PATH=/usr/bin/ssh
+    command: >
+      sh -c "apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null 2>&1 || true;
+             [ -f /app/node_modules/.install-ok ] || (npm install --omit=dev >/dev/null 2>&1 && touch /app/node_modules/.install-ok) || true;
+             exec node /app/server.js"
+
+volumes:
+  deps:

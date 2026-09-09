@@ -1,0 +1,2519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Lightsail 控制面板</title>
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+/* ============================================================
+   AWS Lightsail 控制面板 —— 深色运维面板
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+:root {
+  --bg: #0A1826;
+  --surface: #102A3F;
+  --surface-2: #0C2033;
+  --surface-3: #17374F;
+  --border: #1E3D5C;
+  --border-2: #2C5275;
+  --accent: #FF9900;
+  --accent-hover: #FFB84D;
+  --accent-soft: rgba(255, 153, 0, 0.12);
+  --ok: #2FBF8F;
+  --ok-soft: rgba(47, 191, 143, 0.14);
+  --warn: #F0A35E;
+  --warn-soft: rgba(240, 163, 94, 0.14);
+  --danger: #E5484D;
+  --danger-soft: rgba(229, 72, 77, 0.14);
+  --info: #58A6E8;
+  --text: #E8EEF4;
+  --text-2: #9CB4C7;
+  --text-3: #647F96;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+html { min-width: 1080px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+h1, h2, h3, h4 { margin: 0; font-weight: 600; }
+a { color: var(--info); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------------- 布局 ---------------- */
+.layout { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 212px;
+  flex: 0 0 212px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px; border-bottom: 1px solid var(--border); }
+.brand-mark {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent) 0%, #E07B00 100%);
+  display: flex; align-items: center; justify-content: center; flex: 0 0 34px;
+}
+.brand-mark svg { width: 20px; height: 20px; stroke: #0A1826; }
+.brand-name { font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
+.brand-sub { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+.nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  color: var(--text-2); font-size: 13.5px; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-item svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.nav-item:hover { background: var(--surface); color: var(--text); text-decoration: none; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent-hover); border-color: rgba(255, 153, 0, 0.25); }
+.sidebar-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-3); }
+.creds-status { display: flex; align-items: center; gap: 8px; }
+.creds-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+.creds-status.ok .dot { background: var(--ok); }
+.creds-status .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  height: 58px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; border-bottom: 1px solid var(--border);
+  background: rgba(10, 24, 38, 0.85); position: sticky; top: 0; z-index: 20;
+}
+.topbar-title { font-size: 16px; font-weight: 700; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.region-chip {
+  font-family: var(--mono); font-size: 12px; color: var(--text-2);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 12px;
+}
+/* ---------------- 面板切换器（AWS / 甲骨文） ---------------- */
+.panel-switch { display: flex; align-items: center; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+.ps-btn {
+  border: none; background: transparent; color: var(--text-2);
+  font-family: var(--sans); font-size: 12.5px; padding: 5px 14px;
+  border-radius: 6px; cursor: pointer; white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.ps-btn:hover { color: var(--text); }
+.ps-btn.active { background: var(--accent); color: #0A1826; font-weight: 700; }
+.oci-view { flex: 1; min-height: 0; display: none; }
+.oci-view.show { display: flex; }
+.oci-view iframe { display: none; }
+.hidden { display: none !important; }
+.oci-wrap { flex: 1; min-width: 0; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+.oci-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.oci-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.oci-toolbar h2 { font-size: 15px; color: var(--text); }
+.oci-auto { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+.oci-tip { color: var(--text-3); font-size: 12.5px; line-height: 1.7; margin-bottom: 12px; }
+.oci-tip code, .oci-help code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+.oci-help { margin: 12px 0 16px; border: 1px dashed var(--border-2); border-radius: 8px; padding: 10px 14px; }
+.oci-help summary { cursor: pointer; color: var(--text-2); font-weight: 600; }
+.oci-help ol { margin: 10px 0 4px 18px; color: var(--text-2); line-height: 1.9; font-size: 12.5px; }
+.oci-help li b { color: var(--text); }
+.oci-combo { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.oci-combo select { flex: 1; }
+.oci-keylabel { display: block; font-size: 13px; color: var(--text-2); font-weight: 600; margin-top: 10px; }
+.oci-keylabel textarea { width: 100%; margin-top: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-family: var(--mono); font-size: 12px; }
+.oci-keylabel textarea:focus { outline: none; border-color: var(--accent); }
+.oci-view .table { min-width: 880px; }
+.oci-view .inst-name { font-weight: 600; color: var(--text); }
+.oci-view .inst-sub { color: var(--text-3); font-size: 11.5px; margin-top: 2px; }
+.oci-view .ops { white-space: nowrap; }
+.oci-view .ops .btn { margin-right: 6px; }
+.oci-view .form-card label { display: block; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
+.oci-view .form-card input[type="text"], .oci-view .form-card select, .oci-view .form-card textarea {
+  display: block; width: 100%; margin-top: 6px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+  background: var(--surface-2); color: var(--text); font-weight: 400;
+}
+.oci-view .form-card input:focus, .oci-view .form-card select:focus { outline: none; border-color: var(--accent); }
+.oci-radio { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; cursor: pointer; color: var(--text-2); font-weight: 400; }
+.oci-radio:hover { border-color: var(--accent); }
+.oci-frow { display: flex; gap: 14px; }
+.oci-frow label { flex: 1; }
+.oci-rule-block { margin-bottom: 18px; }
+.oci-rule-block h4 { font-size: 14px; margin-bottom: 8px; color: var(--text); }
+.oci-rule-block h5 { font-size: 12.5px; color: var(--text-2); margin: 12px 0 6px; }
+.oci-rule-block .table { min-width: 0; font-size: 12.5px; }
+.view { padding: 24px; flex: 1; }
+
+/* ---------------- 按钮 ---------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: 1px solid var(--border-2); background: var(--surface-3); color: var(--text);
+  font-family: var(--sans); font-size: 13px; padding: 8px 14px;
+  border-radius: var(--radius-sm); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  user-select: none; white-space: nowrap;
+}
+.btn svg { width: 15px; height: 15px; }
+.btn:hover:not(:disabled) { background: #1D405F; border-color: var(--border-2); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-accent { background: var(--accent); border-color: var(--accent); color: #1A0F00; font-weight: 600; }
+.btn-accent:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger { border-color: rgba(229, 72, 77, 0.5); color: #FF8A8E; background: var(--danger-soft); }
+.btn-danger:hover:not(:disabled) { background: rgba(229, 72, 77, 0.25); }
+.btn-ghost { background: transparent; border-color: var(--border); color: var(--text-2); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-sm svg { width: 13px; height: 13px; }
+.btn-block { width: 100%; }
+
+/* ---------------- 页面头部 ---------------- */
+.page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
+.page-head h1 { font-size: 20px; }
+.page-head .sub { color: var(--text-3); font-size: 12.5px; margin-top: 3px; }
+.page-actions { display: flex; align-items: center; gap: 10px; }
+.count-badge { font-size: 12px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; }
+
+/* ---------------- 卡片 / 实例网格 ---------------- */
+.instance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.instance-card { position: relative; display: flex; flex-direction: column; gap: 12px; transition: border-color 0.15s, transform 0.15s; }
+.instance-card:hover { border-color: var(--border-2); }
+.inst-top { display: flex; align-items: center; gap: 10px; }
+.inst-top h3 { font-size: 15px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.inst-top h3:hover { color: var(--info); }
+.inst-state { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.3px; flex: 0 0 auto; }
+.inst-state.running { color: var(--ok); background: var(--ok-soft); }
+.inst-state.stopped { color: var(--text-3); background: rgba(100, 127, 150, 0.14); }
+.inst-state.starting, .inst-state.stopping, .inst-state.pending { color: var(--warn); background: var(--warn-soft); }
+.inst-state.unknown { color: var(--text-2); background: var(--surface-3); }
+.inst-ip { font-family: var(--mono); font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 3px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 11px; }
+.inst-ip .ip-row { display: flex; align-items: center; gap: 7px; }
+.inst-ip svg { width: 13px; height: 13px; flex: 0 0 13px; color: var(--text-3); }
+.inst-ip .val { margin-left: auto; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inst-ip .val-ipv6 { white-space: normal; word-break: break-all; overflow: visible; text-overflow: clip; }
+.ip-copy { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 21px; height: 21px; margin-left: 5px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-3); cursor: pointer; vertical-align: middle; }
+.ip-copy:hover { color: var(--accent); border-color: var(--border); background: var(--surface-3); }
+.ip-copy svg { width: 12px; height: 12px; }
+.info-cell .v .ip-copy { margin-left: 8px; }
+.inst-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font-size: 11px; color: var(--text-2); background: var(--surface-3); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+.tag.region { color: var(--info); border-color: rgba(88, 166, 232, 0.35); }
+.inst-ports { font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 7px; }
+.inst-ports svg { width: 13px; height: 13px; }
+.inst-actions { display: flex; gap: 8px; }
+.inst-actions .btn { flex: 1; }
+.inst-actions .btn:last-child { flex: 0 0 auto; }
+
+/* ---------------- LED ---------------- */
+.led { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; background: var(--text-3); }
+.led.running { background: var(--ok); box-shadow: 0 0 6px rgba(47, 191, 143, 0.7); }
+.led.stopped { background: #5A7084; }
+.led.starting, .led.stopping, .led.pending { background: var(--warn); box-shadow: 0 0 6px rgba(240, 163, 94, 0.7); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---------------- 详情 ---------------- */
+.back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; margin-bottom: 14px; cursor: pointer; }
+.back-link svg { width: 14px; height: 14px; }
+.back-link:hover { color: var(--info); text-decoration: none; }
+.detail-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
+.detail-head h1 { font-size: 20px; }
+.detail-head .led { width: 12px; height: 12px; flex: 0 0 12px; }
+.detail-head .actions { margin-left: auto; display: flex; gap: 8px; }
+.detail-sub { color: var(--text-3); font-size: 12.5px; margin-bottom: 20px; }
+.detail-sub code { color: var(--text-2); }
+
+.section { margin-bottom: 22px; }
+.section-title { font-size: 13px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.section-title svg { width: 15px; height: 15px; }
+.section-title .btn { margin-left: auto; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.info-cell { background: var(--surface); padding: 11px 14px; min-height: 60px; }
+.info-cell .k { font-size: 11px; color: var(--text-3); margin-bottom: 4px; letter-spacing: 0.3px; }
+.info-cell .v { font-size: 13px; color: var(--text); word-break: break-all; font-family: var(--mono); }
+.info-cell .v.plain { font-family: var(--sans); }
+
+/* ---------------- 表格 ---------------- */
+.table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; background: var(--surface); }
+table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
+.table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.table tr:last-child td { border-bottom: none; }
+.table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.table .mono { color: var(--text); }
+.port-proto { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: var(--surface-3); color: var(--info); border: 1px solid var(--border); text-transform: uppercase; }
+.state-pill { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+.state-pill.open { color: var(--ok); background: var(--ok-soft); }
+.state-pill.closed { color: var(--text-3); background: rgba(100, 127, 150, 0.14); }
+
+/* 行内编辑 */
+.edit-cell { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.edit-cell .input { width: auto; min-width: 64px; padding: 5px 8px; font-size: 12.5px; }
+.edit-cell .input.proto { min-width: 84px; }
+.edit-cell .input.wide { min-width: 180px; flex: 1; }
+.row-actions { display: flex; gap: 6px; }
+.dirty-bar { display: flex; align-items: center; gap: 10px; background: var(--accent-soft); border: 1px solid rgba(255, 153, 0, 0.3); border-radius: var(--radius-sm); padding: 8px 12px; margin-top: 10px; font-size: 12.5px; color: var(--accent-hover); }
+
+/* ---------------- 表单 ---------------- */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field.full { grid-column: 1 / -1; }
+.field label { font-size: 12px; color: var(--text-2); font-weight: 600; }
+.field .hint { font-size: 11px; color: var(--text-3); }
+.input, select.input, textarea.input {
+  background: var(--surface-2); border: 1px solid var(--border-2); color: var(--text);
+  font-family: var(--sans); font-size: 13px; padding: 8px 11px;
+  border-radius: var(--radius-sm); outline: none; width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255, 153, 0, 0.18); }
+textarea.input { resize: vertical; min-height: 90px; font-family: var(--mono); line-height: 1.5; }
+.input.mono { font-family: var(--mono); }
+select.input { cursor: pointer; }
+.form-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+.form-card h3 { font-size: 14px; margin-bottom: 14px; }
+.form-actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; }
+
+/* ---------------- 选择卡片（蓝图 / 套餐） ---------------- */
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.pick-card {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 14px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.pick-card:hover { border-color: var(--border-2); background: var(--surface); }
+.pick-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.pick-card .t { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.pick-card .d { font-size: 11.5px; color: var(--text-3); margin-top: 5px; line-height: 1.5; }
+.pick-card .price { color: var(--accent-hover); font-weight: 700; font-family: var(--mono); }
+.pick-card .plat { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border); color: var(--text-2); text-transform: uppercase; }
+.pick-card .plat.win { color: var(--info); }
+
+/* ---------------- 空态 / 错误 / 提示 ---------------- */
+.empty { text-align: center; padding: 60px 20px; color: var(--text-3); background: var(--surface); border: 1px dashed var(--border-2); border-radius: var(--radius); }
+.empty svg { width: 40px; height: 40px; margin-bottom: 12px; opacity: 0.6; }
+.empty .title { font-size: 15px; color: var(--text-2); margin-bottom: 6px; }
+.empty .desc { font-size: 12.5px; max-width: 420px; margin: 0 auto 16px; }
+.error-box { background: var(--danger-soft); border: 1px solid rgba(229, 72, 77, 0.4); color: #FFB4B6; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: flex; gap: 8px; align-items: flex-start; }
+.error-box svg { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 2px; }
+.notice { background: var(--accent-soft); border: 1px solid rgba(255, 153, 0, 0.3); color: var(--accent-hover); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12.5px; margin-bottom: 14px; line-height: 1.6; }
+.info-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; font-size: 12.5px; color: var(--text-2); line-height: 1.7; margin-bottom: 16px; }
+.info-box b { color: var(--text); }
+.info-box code { color: var(--accent-hover); }
+
+/* ---------------- 步骤条 ---------------- */
+.steps { display: flex; align-items: center; gap: 0; margin-bottom: 22px; flex-wrap: wrap; }
+.step { display: flex; align-items: center; gap: 9px; }
+.step .num { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-3); border: 1px solid var(--border-2); color: var(--text-3); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.step.active .num { background: var(--accent); border-color: var(--accent); color: #1A0F00; }
+.step.done .num { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.step .label { font-size: 13px; color: var(--text-3); }
+.step.active .label { color: var(--text); font-weight: 600; }
+.step-line { flex: 0 0 40px; height: 1px; background: var(--border-2); margin: 0 12px; }
+
+/* ---------------- Modal / Toast / Busy ---------------- */
+.modal-root { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; }
+.modal-root.show { display: flex; }
+.auth-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(5,12,20,.88); backdrop-filter: blur(6px); }
+.auth-card { width: 380px; max-width: calc(100vw - 40px); background: var(--bg); border: 1px solid var(--border-2); border-radius: 14px; padding: 32px 32px 22px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+.auth-logo { font-size: 22px; font-weight: 800; color: var(--accent); text-align: center; letter-spacing: .5px; }
+.auth-logo span { color: var(--text); }
+.auth-sub { text-align: center; color: var(--text-3); font-size: 12px; margin: 6px 0 22px; letter-spacing: 2px; }
+.auth-tabs { display: flex; background: rgba(255,255,255,.04); border: 1px solid var(--border); border-radius: 9px; padding: 3px; margin-bottom: 18px; }
+.auth-tab { flex: 1; padding: 9px 0; background: transparent; border: 0; color: var(--text-2); font-size: 14px; cursor: pointer; border-radius: 7px; transition: all .15s; }
+.auth-tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.auth-input { width: 100%; box-sizing: border-box; padding: 11px 13px; background: rgba(255,255,255,.05); border: 1px solid var(--border-2); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 12px; outline: none; transition: border .15s; }
+.auth-input:focus { border-color: var(--accent); }
+.auth-btn { width: 100%; padding: 11px 0; font-size: 15px; margin-top: 4px; }
+.auth-msg { min-height: 20px; color: var(--danger, #ff5a5f); font-size: 13px; text-align: center; margin-top: 10px; }
+.auth-hint { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); color: var(--text-3); font-size: 12px; line-height: 1.7; text-align: center; }
+.auth-user { color: var(--text-2); font-size: 13px; margin-right: 2px; white-space: nowrap; }
+.modal-mask { position: absolute; inset: 0; background: rgba(4, 10, 16, 0.72); backdrop-filter: blur(2px); }
+.modal { position: relative; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; width: 460px; max-width: calc(100vw - 40px); box-shadow: var(--shadow); padding: 22px; }
+.modal h3 { font-size: 15px; margin-bottom: 10px; }
+.modal .msg { font-size: 13px; color: var(--text-2); line-height: 1.65; }
+.modal .msg b { color: var(--text); font-family: var(--mono); }
+.modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.toast-root { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: var(--surface-3); border: 1px solid var(--border-2); color: var(--text); border-radius: var(--radius-sm); padding: 10px 16px; font-size: 13px; min-width: 240px; max-width: 420px; box-shadow: var(--shadow); display: flex; gap: 9px; align-items: flex-start; animation: slideIn 0.2s ease-out; }
+.toast svg { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 1px; }
+.toast.ok { border-color: rgba(47, 191, 143, 0.5); }
+.toast.ok svg { color: var(--ok); }
+.toast.err { border-color: rgba(229, 72, 77, 0.55); }
+.toast.err svg { color: var(--danger); }
+.toast.warn { border-color: rgba(240, 163, 94, 0.55); }
+.toast.warn svg { color: var(--warn); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.busy-root { position: fixed; inset: 0; z-index: 150; display: none; align-items: center; justify-content: center; background: rgba(4, 10, 16, 0.5); }
+.busy-root.show { display: flex; }
+.spinner { width: 34px; height: 34px; border: 3px solid var(--border-2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------------- 在线 SSH 终端 ---------------- */
+.ssh-modal { width: 920px; max-width: calc(100vw - 40px); padding: 0; overflow: hidden; }
+.ssh-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.ssh-head strong { font-size: 14px; }
+.ssh-sub { font-size: 12px; color: var(--text-3); margin-left: 10px; }
+.ssh-sub.connected { color: var(--ok); }
+.ssh-sub.error { color: var(--danger); }
+.ssh-body { height: 480px; padding: 8px; background: #0b0f14; }
+#ssh-terminal { width: 100%; height: 100%; }
+#ssh-terminal .xterm { height: 100%; }
+#ssh-terminal .xterm-viewport { background-color: #0b0f14 !important; }
+
+/* ---------------- 同步配置详情 ---------------- */
+.sync-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 18px; }
+.sync-cell { background: var(--surface); padding: 10px 13px; }
+.sync-cell .k { font-size: 11px; color: var(--text-3); margin-bottom: 3px; }
+.sync-cell .v { font-size: 12.5px; font-family: var(--mono); color: var(--text); word-break: break-all; }
+.tags-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ===== 侧栏 ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Lightsail 面板</div>
+        <div class="brand-sub">AWS 光帆实例控制台</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a class="nav-item" data-nav="instances" href="#/instances">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        实例
+      </a>
+      <a class="nav-item" data-nav="create" href="#/create">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        创建实例
+      </a>
+      <a class="nav-item" data-nav="settings" href="#/settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        设置
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="creds-status" id="creds-status">
+        <span class="dot"></span>
+        <span class="label" id="creds-label">凭证未配置</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== 主区域 ===== -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-title" id="topbar-title">实例</div>
+      <div class="topbar-right">
+        <div class="panel-switch" id="panel-switch">
+          <button class="ps-btn active" data-panel="aws" title="AWS 光帆实例控制台">AWS 光帆</button>
+          <button class="ps-btn" data-panel="oci" title="甲骨文 OCI 实例控制台">甲骨文 OCI</button>
+        </div>
+        <span class="region-chip" id="region-chip">区域：--</span>
+        <button class="btn btn-ghost btn-sm" id="btn-refresh" title="重新加载当前页面数据">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          刷新
+        </button>
+        <button class="btn btn-ghost btn-sm" id="btn-test-conn" title="用当前凭证调用 AWS 验证连接">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+          测试连接
+        </button>
+        <span class="auth-user" id="auth-user-chip" style="display:none"></span>
+        <button class="btn btn-ghost btn-sm" id="btn-logout" style="display:none">退出</button>
+      </div>
+    </header>
+    <div class="view" id="view"><div class="empty"><div class="spinner" style="margin:0 auto"></div></div></div>
+    <div class="oci-view" id="oci-view">
+      <div class="oci-wrap">
+        <div class="oci-tabs">
+          <button class="ps-btn active" data-ocitab="instances" title="甲骨文实例列表">实例</button>
+          <button class="ps-btn" data-ocitab="settings" title="OCI API 设置">设置</button>
+        </div>
+
+        <div id="oci-view-instances">
+          <div class="oci-toolbar">
+            <h2>实例列表</h2>
+            <label class="oci-auto"><input type="checkbox" id="oci-auto-refresh" checked> 自动刷新（5 秒）</label>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr><th>名称</th><th>状态</th><th>规格</th><th>公网 IPv4</th><th>内网 IPv4</th><th>IPv6</th><th>操作</th></tr>
+              </thead>
+              <tbody id="oci-inst-body"></tbody>
+            </table>
+          </div>
+          <div id="oci-list-msg" class="empty" style="margin-top:14px">加载中…</div>
+        </div>
+
+        <div id="oci-view-settings" class="hidden">
+          <div class="form-card">
+            <h3>OCI API 设置</h3>
+            <p class="oci-tip">填写 Oracle Cloud API 密钥信息（租户 OCID、用户 OCID、指纹、私钥、区域、分区）。凭证仅保存在服务器本地文件中，不会上传到任何地方。</p>
+            <details class="oci-help">
+              <summary>如何获取这些凭证？（点击展开）</summary>
+              <ol>
+                <li>登录 OCI 控制台 → 右上角头像 → <b>Tenancy: xxx</b>，复制「租户 OCID」。</li>
+                <li>头像 → <b>我的资料</b> → 左侧 <b>API 密钥</b> → <b>添加 API 密钥</b>（生成密钥对并下载私钥）→ 复制「指纹 Fingerprint」。</li>
+                <li>我的资料 → <b>用户信息</b> → 复制「用户 OCID」。</li>
+                <li>把下载的私钥文件内容（<code>-----BEGIN PRIVATE KEY-----</code> 整段）粘贴到下方「私钥内容」，或填写私钥文件完整路径。</li>
+                <li>区域填例如 <code>ap-singapore-1</code>。分区选根分区或你的 compartment。</li>
+              </ol>
+            </details>
+            <div class="form-grid">
+              <label>租户 OCID（Tenancy OCID）
+                <input id="oci-tenancy" type="text" placeholder="ocid1.tenancy.oc1.." autocomplete="off">
+              </label>
+              <label>用户 OCID（User OCID）
+                <input id="oci-user" type="text" placeholder="ocid1.user.oc1.." autocomplete="off">
+              </label>
+              <label>API 密钥指纹（Fingerprint）
+                <input id="oci-fingerprint" type="text" placeholder="aa:bb:cc:..." autocomplete="off">
+              </label>
+              <label>区域（Region）
+                <input id="oci-region" type="text" placeholder="ap-singapore-1" autocomplete="off">
+              </label>
+              <label>分区（Compartment）
+                <div class="oci-combo">
+                  <select id="oci-compartment"><option value="">根分区（不填默认租户根分区）</option></select>
+                  <button type="button" id="oci-btn-compartments" class="btn btn-sm">加载分区</button>
+                </div>
+              </label>
+              <label>私钥文件路径（二选一，可留空）
+                <input id="oci-key-file" type="text" placeholder="/data/oci_api_key.pem 或 C:\Users\xxx\.oci\oci_api_key.pem" autocomplete="off">
+              </label>
+            </div>
+            <label class="oci-keylabel">私钥内容（二选一，可留空）
+              <textarea id="oci-key-content" rows="6" placeholder="-----BEGIN PRIVATE KEY-----&#10;...整段粘贴，或留空使用上面的文件路径..."></textarea>
+            </label>
+            <div id="oci-key-hint" class="oci-tip"></div>
+            <div class="form-actions">
+              <button id="oci-btn-save" class="btn btn-accent">保存设置</button>
+              <button id="oci-btn-test2" class="btn">测试连接</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="modal-root" id="modal-root"></div>
+
+<div class="auth-modal" id="auth-modal" style="display:none">
+  <div class="auth-card">
+    <div class="auth-logo">☁ <span>云服务器控制台</span></div>
+    <div class="auth-sub">AWS 光帆 · 甲骨文 OCI</div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="atab-login">登 录</button>
+      <button class="auth-tab" id="atab-register">注册账号</button>
+    </div>
+    <div class="auth-form" id="auth-form-login">
+      <input class="auth-input" id="auth-user" placeholder="账号" autocomplete="username">
+      <input class="auth-input" id="auth-pass" type="password" placeholder="密码" autocomplete="current-password">
+      <button class="btn btn-accent auth-btn" id="btn-auth-login">登 录</button>
+    </div>
+    <div class="auth-form" id="auth-form-register" style="display:none">
+      <input class="auth-input" id="reg-user" placeholder="账号（3-32 位字母/数字/_-）" autocomplete="username">
+      <input class="auth-input" id="reg-pass" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password">
+      <input class="auth-input" id="reg-pass2" type="password" placeholder="确认密码" autocomplete="new-password">
+      <button class="btn btn-accent auth-btn" id="btn-auth-register">注册并登录</button>
+    </div>
+    <div class="auth-msg" id="auth-msg"></div>
+    <div class="auth-hint">云凭证按账号保存在服务器端，换任何电脑登录本账号即可继续使用，无需重新配置</div>
+  </div>
+</div>
+<div class="toast-root" id="toast-root"></div>
+<div class="busy-root" id="busy-root"><div class="spinner"></div></div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/xterm-addon-fit.js"></script>
+<script>
+'use strict';
+
+/* ============================================================
+   账号登录 / 注册 / 退出
+   云凭证（AWS / OCI）按账号保存在服务端，换电脑登录本账号即可继续使用
+   ============================================================ */
+var Auth = (function () {
+  var authed = false;
+  var currentUser = '';
+
+  function el(id) { return document.getElementById(id); }
+  function panelTarget() { return location.hash.replace(/^#\/?/, '').split('?')[0] === 'oci' ? 'oci' : 'aws'; }
+
+  function showAuth() { el('auth-modal').style.display = 'flex'; }
+  function hideAuth() { el('auth-modal').style.display = 'none'; }
+  function authMsg(t) { el('auth-msg').textContent = t || ''; }
+
+  function switchTab(tab) {
+    el('atab-login').classList.toggle('active', tab === 'login');
+    el('atab-register').classList.toggle('active', tab === 'register');
+    el('auth-form-login').style.display = tab === 'login' ? '' : 'none';
+    el('auth-form-register').style.display = tab === 'register' ? '' : 'none';
+    authMsg('');
+  }
+
+  function afterLogin(user) {
+    authed = true;
+    currentUser = user;
+    hideAuth();
+    el('auth-user-chip').textContent = '账号：' + user;
+    el('auth-user-chip').style.display = '';
+    el('btn-logout').style.display = '';
+    // 按当前 hash 恢复对应面板（AWS 渲染 / OCI 懒初始化）
+    if (panelTarget() === 'oci') {
+      var view = document.getElementById('view');
+      var oci = document.getElementById('oci-view');
+      if (view && oci) {
+        view.style.display = 'none';
+        oci.classList.add('show');
+        if (window.OciPanel && typeof window.OciPanel.onShow === 'function') window.OciPanel.onShow();
+      }
+    } else {
+      render();
+    }
+  }
+
+  async function login() {
+    var u = el('auth-user').value.trim();
+    var p = el('auth-pass').value;
+    if (!u || !p) return authMsg('请输入账号和密码');
+    authMsg('');
+    try {
+      var r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      var d = await r.json().catch(function () { return {}; });
+      if (r.ok && d.ok) return afterLogin(d.user);
+      authMsg(d.error || '登录失败');
+    } catch (e) { authMsg('无法连接服务器：' + e.message); }
+  }
+
+  async function register() {
+    var u = el('reg-user').value.trim();
+    var p = el('reg-pass').value;
+    var p2 = el('reg-pass2').value;
+    if (!u || !p) return authMsg('请输入账号和密码');
+    if (p.length < 6) return authMsg('密码至少 6 位');
+    if (p !== p2) return authMsg('两次输入的密码不一致');
+    authMsg('');
+    try {
+      var r = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      var d = await r.json().catch(function () { return {}; });
+      if (r.ok && d.ok) return afterLogin(d.user);
+      authMsg(d.error || '注册失败');
+    } catch (e) { authMsg('无法连接服务器：' + e.message); }
+  }
+
+  async function logout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) { /* noop */ }
+    authed = false;
+    currentUser = '';
+    el('auth-user-chip').style.display = 'none';
+    el('btn-logout').style.display = 'none';
+    el('auth-user').value = '';
+    el('auth-pass').value = '';
+    el('reg-user').value = '';
+    el('reg-pass').value = '';
+    el('reg-pass2').value = '';
+    switchTab('login');
+    authMsg('已退出登录');
+    showAuth();
+  }
+
+  async function init() {
+    el('atab-login').addEventListener('click', function () { switchTab('login'); });
+    el('atab-register').addEventListener('click', function () { switchTab('register'); });
+    el('btn-auth-login').addEventListener('click', login);
+    el('btn-auth-register').addEventListener('click', register);
+    el('btn-logout').addEventListener('click', logout);
+    ['auth-user', 'auth-pass'].forEach(function (id) {
+      el(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+    });
+    ['reg-user', 'reg-pass', 'reg-pass2'].forEach(function (id) {
+      el(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') register(); });
+    });
+    try {
+      var r = await fetch('/api/auth/me');
+      if (r.ok) {
+        var d = await r.json().catch(function () { return {}; });
+        if (d.user) { afterLogin(d.user); return true; }
+      }
+    } catch (e) { /* 服务器不可达，显示登录层 */ }
+    showAuth();
+    return false;
+  }
+
+  return { init: init, isAuthed: function () { return authed; }, show: showAuth };
+})();
+
+/* 全局拦截：任何 /api 返回 401（未登录 / 会话过期）→ 弹出登录层 */
+(function () {
+  var _origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    return _origFetch(input, init).then(function (r) {
+      if (r.status === 401) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.indexOf('/api/') === 0 && url.indexOf('/api/auth/') !== 0) Auth.show();
+      }
+      return r;
+    });
+  };
+})();
+
+/* ============================================================
+   面板切换（AWS / 甲骨文 OCI）—— 顶部切换器
+   ============================================================ */
+(function () {
+  function applyPanel(panel) {
+    var sw = document.getElementById('panel-switch');
+    var view = document.getElementById('view');
+    var oci = document.getElementById('oci-view');
+    if (!sw || !view || !oci) return;
+    sw.querySelectorAll('.ps-btn').forEach(function (x) {
+      x.classList.toggle('active', x.getAttribute('data-panel') === panel);
+    });
+    if (panel === 'oci') {
+      view.style.display = 'none';
+      oci.classList.add('show');
+      if (window.OciPanel && typeof window.OciPanel.onShow === 'function') window.OciPanel.onShow();
+    } else {
+      oci.classList.remove('show');
+      view.style.display = '';
+    }
+  }
+  function panelFromHash() {
+    return location.hash.replace(/^#\/?/, '').split('?')[0] === 'oci' ? 'oci' : 'aws';
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var sw = document.getElementById('panel-switch');
+    if (!sw) return;
+    sw.querySelectorAll('.ps-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.getAttribute('data-panel') === 'oci') {
+          if (location.hash !== '#/oci') location.hash = '#/oci';
+          else applyPanel('oci');
+        } else {
+          if (panelFromHash() === 'oci') location.hash = '#/instances';
+          else applyPanel('aws');
+        }
+      });
+    });
+    window.addEventListener('hashchange', function () { applyPanel(panelFromHash()); });
+    applyPanel(panelFromHash());
+  });
+})();
+
+/* ============================================================
+   工具函数
+   ============================================================ */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function fmtDateTime(iso) {
+  if (!iso) return '-';
+  let t = iso;
+  // AWS JSON 协议返回的 timestamp 是 epoch 秒（数字），< 1e12 视为秒
+  const n = Number(iso);
+  if (!isNaN(n) && n < 1e12) t = n * 1000;
+  const d = new Date(t);
+  if (isNaN(d.getTime())) return esc(iso);
+  const p = n2 => String(n2).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function fmtGigabytes(gb) { return gb == null ? '-' : `${gb} GB`; }
+function splitNames(text) { return text.split(/[\s,，;；]+/).map(s => s.trim()).filter(Boolean); }
+function parseCidrs(text) {
+  const parts = text.split(/[\s,，;；]+/).map(s => s.trim()).filter(Boolean);
+  const v4 = [], v6 = [];
+  parts.forEach(p => { if (p.includes(':')) v6.push(p); else v4.push(p); });
+  return { cidrs: v4.length ? v4 : undefined, ipv6Cidrs: v6.length ? v6 : undefined };
+}
+function fmtPortRange(p) { return p.fromPort === p.toPort ? p.fromPort : (p.fromPort + '-' + p.toPort); }
+function protoLabel(p) { return (p.protocol || 'tcp').toUpperCase(); }
+
+/* ============================================================
+   AWS Lightsail API 调用（安全加固版）
+   签名与凭证均在本地代理（server.js）完成：浏览器不再持有 AK/SK，
+   请求只需发送 { action, params, region }，由服务端签名后转发。
+   ============================================================ */
+function getProxyUrl() {
+  return location.protocol === 'file:' ? 'http://localhost:8080/api/proxy' : '/api/proxy';
+}
+function getConfigUrl() {
+  return location.protocol === 'file:' ? 'http://localhost:8080/api/config' : '/api/config';
+}
+
+async function callAWS(operation, params, region) {
+  const cfg = getCreds();
+  if (!cfg || !cfg.configured) {
+    throw new Error('尚未配置 AWS 凭证，请先进入「设置」填写 Access Key / Secret Key / 区域并保存到本机');
+  }
+  let res;
+  try {
+    res = await fetch(getProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: operation, params: params || {}, region: region || cfg.region })
+    });
+  } catch (e) {
+    throw new Error('无法连接本地代理。请确认已运行「启动面板.bat」（若已运行，检查 8080 端口是否被占用）');
+  }
+  let data;
+  try { data = await res.json(); } catch (e) { throw new Error('代理返回了无法解析的响应（HTTP ' + res.status + '）'); }
+  if (!res.ok) throw new Error('本地代理错误：' + (data.error || res.status));
+  if (data.status < 200 || data.status >= 300) {
+    let msg = 'AWS 返回 HTTP ' + data.status;
+    try {
+      const j = JSON.parse(data.body);
+      if (j.message) msg = j.message;
+      else if (j.__type) msg = j.__type;
+    } catch (e) { /* 保留默认消息 */ }
+    throw new Error(msg);
+  }
+  try { return JSON.parse(data.body); } catch (e) { throw new Error('AWS 返回了无法解析的数据'); }
+}
+
+/* 并发安全封装 */
+let awsBusy = false;
+async function withBusy(fn) {
+  if (awsBusy) return;
+  awsBusy = true;
+  $('#busy-root').classList.add('show');
+  try { return await fn(); } finally { awsBusy = false; $('#busy-root').classList.remove('show'); }
+}
+
+/* ============================================================
+   本地存储（安全加固版）
+   凭证不再保存在浏览器 localStorage，而是保存在本地代理的
+   aws-credentials.json 文件中；浏览器只缓存配置状态（尾号/区域）。
+   ============================================================ */
+const LS_CREDS = 'lsp_creds'; // 旧版遗留键：仅用于检测与一键迁移
+const LS_SCRIPTS = 'lsp_scripts';
+
+/* 服务端配置状态：{ configured, accessKeyIdTail, region } */
+window.__awsCfg = null;
+async function loadAwsConfig() {
+  try {
+    const r = await fetch(getConfigUrl(), { method: 'GET' });
+    if (r.ok) {
+      const j = await r.json();
+      window.__awsCfg = j || { configured: false, accessKeyIdTail: '', region: '' };
+      return window.__awsCfg;
+    }
+  } catch (e) { /* 代理未启动 */ }
+  window.__awsCfg = null;
+  return null;
+}
+function getCreds() { return window.__awsCfg; }
+
+/* 保存凭证到本机文件（POST /api/config），成功后清除浏览器旧遗留 */
+async function saveCredsToServer(c) {
+  const r = await fetch(getConfigUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(c)
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('保存失败（HTTP ' + r.status + '）'));
+  localStorage.removeItem(LS_CREDS);
+  await loadAwsConfig();
+  return j;
+}
+/* 清除本机文件中的凭证 */
+async function clearCredsOnServer() {
+  const r = await fetch(getConfigUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clear: true })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('清除失败（HTTP ' + r.status + '）'));
+  await loadAwsConfig();
+}
+/* 读取旧版 localStorage 中的凭证（用于一键迁移） */
+function readLegacyCreds() {
+  try {
+    const c = JSON.parse(localStorage.getItem(LS_CREDS));
+    if (c && c.accessKeyId && c.secretAccessKey && c.region) return c;
+  } catch (e) { /* noop */ }
+  return null;
+}
+
+function getScripts() { try { return JSON.parse(localStorage.getItem(LS_SCRIPTS)) || {}; } catch (e) { return {}; } }
+function saveScript(instanceName, text) { const all = getScripts(); all[instanceName] = text; localStorage.setItem(LS_SCRIPTS, JSON.stringify(all)); }
+
+function updateCredsBadge() {
+  const c = getCreds();
+  const el = $('#creds-status'), label = $('#creds-label'), region = $('#region-chip');
+  if (c && c.configured && c.region) {
+    el.classList.add('ok');
+    label.textContent = '凭证已配置 · ' + c.region;
+    region.textContent = '全球视图 · 主区域 ' + c.region;
+  } else {
+    el.classList.remove('ok');
+    label.textContent = '凭证未配置';
+    region.textContent = '区域：--';
+  }
+}
+
+/* ============================================================
+   UI 基础：Toast / Modal / 错误框
+   ============================================================ */
+const ICONS = {
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>',
+  err: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>'
+};
+function toast(msg, type) {
+  const root = $('#toast-root');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || 'info');
+  el.innerHTML = ICONS[type || 'info'] + '<span>' + esc(msg) + '</span>';
+  root.appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity 0.3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4200);
+}
+function confirmDialog({ title, message, confirmText, danger, onConfirm }) {
+  const root = $('#modal-root');
+  root.innerHTML = `
+    <div class="modal-mask" data-close="1"></div>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>${esc(title)}</h3>
+      <div class="msg">${message}</div>
+      <div class="actions">
+        <button class="btn btn-ghost" data-close="1">取消</button>
+        <button class="btn ${danger ? 'btn-danger' : 'btn-accent'}" id="modal-confirm">${esc(confirmText || '确认')}</button>
+      </div>
+    </div>`;
+  root.classList.add('show');
+  const close = () => root.classList.remove('show');
+  root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', close));
+  $('#modal-confirm').addEventListener('click', async () => { close(); await onConfirm(); });
+}
+function errorBox(msg) { return `<div class="error-box">${ICONS.err}<div>${esc(msg)}</div></div>`; }
+
+/* 复制到剪贴板（含降级方案） */
+const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e2) { return false; }
+  }
+}
+function ipValHtml(v, long) {
+  if (!v) return '<span class="val">无</span>';
+  const val = `<span class="val${long ? ' val-ipv6' : ''}" title="${esc(v)}">${esc(v)}</span>`;
+  return val + `<button class="ip-copy" data-copy="${esc(v)}" title="复制" aria-label="复制">${ICON_COPY}</button>`;
+}
+
+/* ============================================================
+   路由
+   ============================================================ */
+function parseHash() {
+  const h = location.hash.replace(/^#\/?/, '');
+  const parts = h.split('?');
+  return { path: parts[0] || 'instances', params: new URLSearchParams(parts[1] || '') };
+}
+
+/* ============================================================
+   状态
+   ============================================================ */
+const state = {
+  instances: null,          // 跨区域实例列表（带 _region）
+  regions: [],              // 启用的区域列表
+  metaByRegion: {},         // 每个区域的 {blueprints, bundles, keyPairs, availabilityZones}
+  detail: { name: null, region: null, ports: [], editingIdx: -1 }
+};
+
+function stateName(code) {
+  switch (code) {
+    case 'running': return '运行中';
+    case 'stopped': return '已停止';
+    case 'pending': case 'starting': return '启动中';
+    case 'stopping': return '停止中';
+    default: return code || '未知';
+  }
+}
+const REGIONS = [
+  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+  'ap-south-1', 'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
+  'ap-southeast-1', 'ap-southeast-2', 'ap-southeast-3',
+  'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-west-3',
+  'eu-north-1', 'sa-east-1'
+];
+
+/* ============================================================
+   视图：实例列表（跨区域）
+   ============================================================ */
+async function getEnabledRegions() {
+  const data = await callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false });
+  return (data.regions || []).map(r => r.name).filter(Boolean);
+}
+
+async function loadAllInstances() {
+  let regions = state.regions;
+  if (!regions.length) {
+    try { regions = await getEnabledRegions(); } catch (e) { /* 无权限时用默认列表 */ }
+    if (!regions.length) regions = REGIONS;
+    state.regions = regions;
+  }
+  const results = await Promise.all(regions.map(async (region) => {
+    try {
+      const data = await callAWS('GetInstances', {}, region);
+      return (data.instances || []).map(i => Object.assign({}, i, { _region: region }));
+    } catch (e) { return null; }
+  }));
+  const instances = results.filter(Boolean).flat();
+  const failed = results.filter(r => r === null).length;
+  return { instances, regions: regions.length, failed };
+}
+
+function instanceCard(inst) {
+  const st = (inst.state && inst.state.name) || 'unknown';
+  const stClass = ['running', 'stopped', 'pending', 'starting', 'stopping'].includes(st) ? st : 'unknown';
+  const ports = (inst.networking && inst.networking.ports) || [];
+  const ram = inst.hardware ? inst.hardware.ramSizeInGb : null;
+  const cpu = inst.hardware ? inst.hardware.cpuCount : null;
+  const zone = inst.location ? inst.location.availabilityZone : '-';
+  const region = inst._region || (inst.location && inst.location.regionName) || '-';
+  const blueprintName = inst.blueprintName || inst.blueprintId || '-';
+  const bundleId = inst.bundleId || '-';
+  const portText = ports.length ? ports.map(fmtPortRange).join(', ') : '无';
+  const ipv6 = (inst.ipv6Addresses || []).join(', ');
+  const canStart = st === 'stopped';
+  const canStop = st === 'running';
+  const canReboot = st === 'running';
+  return `
+  <article class="card instance-card" data-name="${esc(inst.name)}" data-region="${esc(region)}">
+    <div class="inst-top">
+      <span class="led ${stClass}"></span>
+      <h3 data-action="open-instance" data-name="${esc(inst.name)}" data-region="${esc(region)}" title="查看详情">${esc(inst.name)}</h3>
+      <span class="inst-state ${stClass}">${stateName(st)}</span>
+    </div>
+    <div class="inst-ip">
+      <div class="ip-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span>公网 IP</span>${ipValHtml(inst.publicIpAddress)}
+      </div>
+      <div class="ip-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20"/><circle cx="6" cy="13" r="1"/><circle cx="10" cy="13" r="1"/></svg>
+        <span>私有 IP</span>${ipValHtml(inst.privateIpAddress)}
+      </div>
+      ${ipv6 ? `<div class="ip-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M4 8h16M4 16h16"/></svg>
+        <span>IPv6</span>${ipValHtml(ipv6, true)}
+      </div>` : ''}
+    </div>
+    <div class="inst-meta">
+      <span class="tag region">${esc(region)}</span>
+      <span class="tag">${esc(blueprintName)}</span>
+      <span class="tag">${esc(bundleId)}</span>
+      <span class="tag">${esc(zone)}</span>
+      ${ram ? `<span class="tag">${esc(fmtGigabytes(ram))} 内存</span>` : ''}
+      ${cpu ? `<span class="tag">${cpu} vCPU</span>` : ''}
+    </div>
+    <div class="inst-ports">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 8h20M2 16h20M8 2v20M16 2v20"/></svg>
+      已开放端口：${esc(portText)}
+    </div>
+    <div class="inst-actions">
+      <button class="btn btn-accent btn-sm" data-action="ssh" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStop ? '' : 'disabled'}>SSH</button>
+      <button class="btn btn-sm" data-action="start" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStart ? '' : 'disabled'}>开机</button>
+      <button class="btn btn-sm" data-action="stop" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStop ? '' : 'disabled'}>关机</button>
+      <button class="btn btn-sm" data-action="reboot" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canReboot ? '' : 'disabled'}>重启</button>
+      <button class="btn btn-ghost btn-sm" data-action="open-instance" data-name="${esc(inst.name)}" data-region="${esc(region)}">详情</button>
+      <button class="btn btn-danger btn-sm" data-action="delete" data-name="${esc(inst.name)}" data-region="${esc(region)}">删除</button>
+    </div>
+  </article>`;
+}
+
+async function renderInstances() {
+  const view = $('#view');
+  const cfg = getCreds();
+  if (!cfg || !cfg.configured) {
+    view.innerHTML = `
+      <div class="empty">${ICONS.info}
+        <div class="title">还没有配置 AWS 凭证</div>
+        <div class="desc">需要先填写 Access Key / Secret Key / 区域，才能读取你的光帆实例（所有区域）。</div>
+        <a class="btn btn-accent" href="#/settings">前往设置</a>
+      </div>`;
+    return;
+  }
+  view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
+  try {
+    const { instances, regions, failed } = await withBusy(loadAllInstances);
+    state.instances = instances;
+    const counts = {};
+    instances.forEach(i => { const s = (i.state && i.state.name) || 'unknown'; counts[s] = (counts[s] || 0) + 1; });
+    const running = counts.running || 0;
+    const instRegions = new Set(instances.map(i => i._region || (i.location && i.location.regionName) || '-'));
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <h1>实例</h1>
+          <div class="sub">跨 ${instRegions.size} 个区域 · 共 ${instances.length} 台 · ${running} 台运行中${failed ? `（有 ${failed} 个区域读取失败，可能无权限）` : ''}</div>
+        </div>
+        <div class="page-actions">
+          <span class="count-badge">${instances.length} 台实例</span>
+        </div>
+      </div>
+      ${instances.length === 0
+        ? `<div class="empty">${ICONS.info}<div class="title">所有区域都没有光帆实例</div><div class="desc">可以在「创建实例」中选区域、系统、月租套餐新开机器。</div></div>`
+        : `<div class="instance-grid">${instances.map(instanceCard).join('')}</div>`}`;
+  } catch (e) {
+    view.innerHTML = `
+      <div class="page-head"><h1>实例</h1></div>
+      ${errorBox(e.message)}
+      <div class="info-box">读取实例失败。常见原因：凭证无效、该账号没有 Lightsail 权限（需要 lightsail:GetInstances 等权限），或区域填错。</div>`;
+  }
+}
+
+/* ============================================================
+   视图：实例详情（信息 + 防火墙规则编辑）
+   ============================================================ */
+async function loadDetail(name, region) {
+  const data = await callAWS('GetInstance', { instanceName: name }, region);
+  return data.instance;
+}
+
+function portRowHTML(inst, idx) {
+  const editing = state.detail.editingIdx === idx;
+  if (editing) {
+    const p = state.detail.ports[idx] || {};
+    const cidrText = (p.cidrs || []).concat(p.ipv6Cidrs || []).join(', ');
+    return `
+    <tr>
+      <td><select class="input proto" data-edit-field="protocol">
+        ${['tcp', 'udp', 'icmp'].map(pr => `<option value="${pr}" ${(p.protocol || 'tcp') === pr ? 'selected' : ''}>${pr.toUpperCase()}</option>`).join('')}
+      </select></td>
+      <td><div class="edit-cell">
+        <input class="input mono" data-edit-field="fromPort" type="number" min="1" max="65535" value="${p.fromPort != null ? p.fromPort : ''}" ${p.protocol === 'icmp' ? 'disabled' : ''}>
+        <span style="color:var(--text-3)">–</span>
+        <input class="input mono" data-edit-field="toPort" type="number" min="1" max="65535" value="${p.toPort != null ? p.toPort : ''}" ${p.protocol === 'icmp' ? 'disabled' : ''}>
+      </div></td>
+      <td><input class="input mono wide" data-edit-field="cidrs" value="${esc(cidrText)}" placeholder="0.0.0.0/0, ::/0"></td>
+      <td><span class="state-pill open">待保存</span></td>
+      <td><div class="row-actions">
+        <button class="btn btn-accent btn-sm" data-action="save-port" data-idx="${idx}" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}">保存</button>
+        <button class="btn btn-ghost btn-sm" data-action="cancel-edit-port" data-idx="${idx}">取消</button>
+      </div></td>
+    </tr>`;
+  }
+  const p = state.detail.ports[idx] || {};
+  const proto = (p.protocol || 'tcp').toUpperCase();
+  return `
+    <tr>
+      <td><span class="port-proto">${esc(proto)}</span></td>
+      <td class="mono">${p.fromPort === p.toPort ? p.fromPort : (p.fromPort + ' – ' + p.toPort)}</td>
+      <td class="mono">${esc((p.cidrs || []).concat(p.ipv6Cidrs || []).join(', ') || (p.cidrListAliases || []).join(', ') || '所有来源')}</td>
+      <td><span class="state-pill open">已开放</span></td>
+      <td><div class="row-actions">
+        <button class="btn btn-ghost btn-sm" data-action="edit-port" data-idx="${idx}" data-name="${esc(inst.name)}">编辑</button>
+        <button class="btn btn-danger btn-sm" data-action="remove-port" data-idx="${idx}" data-name="${esc(inst.name)}">移除</button>
+      </div></td>
+    </tr>`;
+}
+
+function renderPortsSection(inst) {
+  const ports = state.detail.ports;
+  const rows = ports.map((p, idx) => portRowHTML(inst, idx)).join('');
+  return `
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 8h20M2 16h20M8 2v20M16 2v20"/></svg>
+        防火墙 / 入站规则（${ports.length} 条）
+      </div>
+      <div class="notice" style="margin-bottom:12px">修改规则后点「保存全部修改」统一生效（覆盖式写入，30–60 秒完成同步）。</div>
+      ${ports.length
+        ? `<div class="table-wrap"><table class="table">
+            <thead><tr><th>协议</th><th>端口</th><th>来源 (CIDR)</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>`
+        : `<div class="empty" style="padding:30px 16px"><div class="title">该实例暂无入站规则</div><div class="desc">默认只有 22（SSH）由 AWS 自动放行，其余端口需要手动开放。</div></div>`}
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn btn-ghost btn-sm" data-action="add-port" data-name="${esc(inst.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          添加规则
+        </button>
+        <button class="btn btn-accent btn-sm" data-action="save-all-ports" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}">
+          保存全部修改
+        </button>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" data-action="open-all-v4" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" title="TCP+UDP 0-65535 + ICMP，来源 0.0.0.0/0">一键开放全部 IPv4 端口</button>
+        <button class="btn btn-sm" data-action="open-all-v6" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" title="TCP+UDP 0-65535 + ICMP，来源 ::/0">一键开放全部 IPv6 端口</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        快速开放端口（单条即时生效）
+      </div>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="field">
+            <label>协议</label>
+            <select class="input" id="port-protocol">
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+              <option value="icmp">ICMP</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>起始端口</label>
+            <input class="input mono" id="port-from" type="number" min="1" max="65535" placeholder="如 8080" value="8080">
+            <div class="hint" id="port-range-hint">TCP/UDP：1 – 65535</div>
+          </div>
+          <div class="field">
+            <label>结束端口</label>
+            <input class="input mono" id="port-to" type="number" min="1" max="65535" placeholder="单端口填相同值" value="8080">
+          </div>
+          <div class="field full">
+            <label>来源 (CIDR)</label>
+            <input class="input mono" id="port-cidr" placeholder="默认 0.0.0.0/0（所有 IPv4）。支持 IPv6，如 ::/0；多个来源用逗号分隔">
+            <div class="hint">只允许指定 IP 访问更安全，例如 203.0.113.5/32</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-accent" data-action="open-port" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            开放端口
+          </button>
+          <span class="hint" style="color:var(--text-3)">规则即时生效（可能需 30–60 秒同步）</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDetailTags(inst) {
+  const tags = inst.tags || [];
+  if (!tags.length) return '<span style="color:var(--text-3);font-size:12.5px">无标签</span>';
+  return `<div class="tags-row">${tags.map(t => `<span class="tag">${esc(t.key)}${t.value ? '=' + esc(t.value) : ''}</span>`).join('')}</div>`;
+}
+
+/* 完整渲染详情视图（数据来自 state.detail，不重新请求 AWS） */
+function renderDetailHTML(inst) {
+  const view = $('#view');
+  const name = inst.name;
+  const region = state.detail.region;
+  const st = (inst.state && inst.state.name) || 'unknown';
+  const stClass = ['running', 'stopped', 'pending', 'starting', 'stopping'].includes(st) ? st : 'unknown';
+  const hw = inst.hardware || {};
+  const net = inst.networking || {};
+  const loc = inst.location || {};
+  const disks = (hw.disks || []).map(d => `${d.sizeInGb}GB (${d.path || ''})`).join('；') || '-';
+  const transfer = net.monthlyTransfer ? (net.monthlyTransfer.gbPerMonthAllocated + ' GB/月') : '-';
+  const meta = inst.metadataOptions || {};
+  const ipv6 = (inst.ipv6Addresses || []).join(', ') || '无';
+  const cells = [
+    ['公网 IP', inst.publicIpAddress || '无'],
+    ['私有 IP', inst.privateIpAddress || '无'],
+    ['IPv6 地址', ipv6],
+    ['SSH 用户名', inst.userName || '-'],
+    ['区域 / 可用区', (region || '-') + ' / ' + (loc.availabilityZone || '-')],
+    ['蓝图（系统）', (inst.blueprintName || '-') + ' (' + (inst.blueprintId || '-') + ')'],
+    ['套餐', inst.bundleId || '-'],
+    ['CPU / 内存', (hw.cpuCount != null ? hw.cpuCount + ' vCPU / ' : '') + (hw.ramSizeInGb != null ? hw.ramSizeInGb + ' GB' : '-')],
+    ['磁盘', disks],
+    ['流量额度', transfer],
+    ['密钥对', inst.keyPairName || '-'],
+    ['静态 IP', inst.isStaticIp ? '已绑定静态 IP' : '否'],
+    ['IP 类型', inst.ipAddressType || '-'],
+    ['创建时间', fmtDateTime(inst.createdAt)],
+    ['HTTP 端点', meta.httpEndpoint || '-'],
+    ['HTTP 令牌', meta.httpTokens || '-']
+  ].map(([k, v]) => {
+    const isIp = k === '公网 IP' || k === '私有 IP' || k === 'IPv6 地址';
+    const vHtml = (isIp && v !== '无')
+      ? `<span>${esc(v)}</span><button class="ip-copy" data-copy="${esc(v)}" title="复制" aria-label="复制">${ICON_COPY}</button>`
+      : esc(v);
+    return `<div class="info-cell"><div class="k">${esc(k)}</div><div class="v">${vHtml}</div></div>`;
+  }).join('');
+
+  view.innerHTML = `
+    <a class="back-link" href="#/instances">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      返回实例列表
+    </a>
+    <div class="detail-head">
+      <span class="led ${stClass}"></span>
+      <h1>${esc(inst.name)}</h1>
+      <span class="tag region">${esc(region)}</span>
+      <span class="inst-state ${stClass}">${stateName(st)}</span>
+      <div class="actions">
+        <button class="btn btn-accent" data-action="ssh" data-name="${esc(name)}" data-region="${esc(region)}" ${st === 'running' ? '' : 'disabled'}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17L10 11L4 5M12 19H20"/></svg>
+          在线 SSH
+        </button>
+        <button class="btn" data-action="start" data-name="${esc(name)}" data-region="${esc(region)}" ${st === 'stopped' ? '' : 'disabled'}>开机</button>
+        <button class="btn" data-action="stop" data-name="${esc(name)}" data-region="${esc(region)}" ${st === 'running' ? '' : 'disabled'}>关机</button>
+        <button class="btn" data-action="reboot" data-name="${esc(name)}" data-region="${esc(region)}" ${st === 'running' ? '' : 'disabled'}>重启</button>
+        <button class="btn btn-danger" data-action="delete" data-name="${esc(name)}" data-region="${esc(region)}">删除实例</button>
+      </div>
+    </div>
+    <div class="detail-sub">ARN：<code>${esc(inst.arn || '-')}</code></div>
+
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+        实例信息
+      </div>
+      <div class="info-grid">${cells}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><circle cx="7" cy="7" r="1.5"/></svg>
+        标签
+      </div>
+      ${renderDetailTags(inst)}
+    </div>
+
+    ${renderPortsSection(inst)}
+  `;
+}
+
+async function renderInstanceDetail(name, region) {
+  const view = $('#view');
+  state.detail = { name, region, ports: [], editingIdx: -1, _inst: null };
+  view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
+  try {
+    const inst = await withBusy(() => loadDetail(name, region));
+    state.detail.ports = ((inst.networking && inst.networking.ports) || []).map(p => ({
+      fromPort: p.fromPort, toPort: p.toPort, protocol: p.protocol,
+      cidrs: p.cidrs || undefined, ipv6Cidrs: p.ipv6Cidrs || undefined, cidrListAliases: p.cidrListAliases || undefined
+    }));
+    state.detail._inst = inst;
+    renderDetailHTML(inst);
+  } catch (e) {
+    view.innerHTML = `
+      <a class="back-link" href="#/instances">返回实例列表</a>
+      <div class="page-head"><h1>${esc(name)}</h1></div>
+      ${errorBox(e.message)}`;
+  }
+}
+
+/* ============================================================
+   视图：创建实例（自定义区域 / 系统 / 月租套餐）
+   ============================================================ */
+async function loadRegionMeta(region) {
+  if (state.metaByRegion[region]) return state.metaByRegion[region];
+  const [bp, bd, kp, rg] = await Promise.all([
+    callAWS('GetBlueprints', { includeInactive: false }, region),
+    callAWS('GetBundles', {}, region),
+    callAWS('GetKeyPairs', {}, region),
+    callAWS('GetRegions', { includeAvailabilityZones: true, includeRelationalDatabaseAvailabilityZones: false }, region)
+  ]);
+  const regionInfo = (rg.regions || []).find(r => r.name === region);
+  const meta = {
+    blueprints: (bp.blueprints || []).filter(b => b.isActive !== false),
+    bundles: (bd.bundles || []).filter(b => b.isActive !== false),
+    keyPairs: kp.keyPairs || [],
+    availabilityZones: (regionInfo && regionInfo.availabilityZones ? regionInfo.availabilityZones.map(z => z.zoneName || z.name) : [])
+  };
+  state.metaByRegion[region] = meta;
+  return meta;
+}
+
+function blueprintLabel(b) { return `${b.name || b.blueprintId}${b.version ? ' ' + b.version : ''}`; }
+
+function renderCreateView() {
+  const view = $('#view');
+  view.innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>创建实例</h1>
+        <div class="sub">自定义选择区域、系统（蓝图）与月租套餐，新开光帆机器</div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-grid">
+        <div class="field full">
+          <label>从现有实例复制（可选）</label>
+          <select class="input" id="create-template">
+            <option value="">— 全新创建，不复制 —</option>
+            ${(state.instances || []).map(i => `<option value="${esc(i.name)}" data-region="${esc(i._region || '')}">${esc(i.name)}（${esc(i._region || '')}）</option>`).join('')}
+          </select>
+          <div class="hint">选择后会带入该实例的区域 / 系统 / 套餐 / 密钥，可再修改</div>
+        </div>
+        <div class="field full">
+          <label>1. 选择区域</label>
+          <select class="input" id="create-region">
+            <option value="">— 加载中… —</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="create-step2"></div>
+  `;
+  loadRegionsIntoSelect();
+  $('#create-template').addEventListener('change', onTemplateChange);
+  $('#create-region').addEventListener('change', onRegionChange);
+}
+
+async function loadRegionsIntoSelect() {
+  const sel = $('#create-region');
+  try {
+    let regions = state.regions;
+    if (!regions.length) { regions = await getEnabledRegions(); if (!regions.length) regions = REGIONS; state.regions = regions; }
+    sel.innerHTML = '<option value="">— 选择区域 —</option>' + regions.map(r => `<option value="${r}">${r}</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">— 选择区域 —</option>' + REGIONS.map(r => `<option value="${r}">${r}</option>`).join('');
+  }
+}
+
+async function onTemplateChange() {
+  const sel = $('#create-template');
+  const name = sel.value;
+  if (!name) return;
+  const inst = (state.instances || []).find(i => i.name === name);
+  if (!inst) return;
+  const region = inst._region || (inst.location && inst.location.regionName);
+  if (region) {
+    $('#create-region').value = region;
+    await onRegionChange();
+  }
+  const meta = state.metaByRegion[region];
+  if (meta) {
+    const bpSel = $('#create-blueprint');
+    if (bpSel) bpSel.value = inst.blueprintId || '';
+    const bdSel = $('#create-bundle');
+    if (bdSel) bdSel.value = inst.bundleId || '';
+    const keySel = $('#create-key');
+    if (keySel) keySel.value = inst.keyPairName || '';
+    const azSel = $('#create-az');
+    if (azSel && inst.location && inst.location.availabilityZone) azSel.value = inst.location.availabilityZone;
+    const script = getScripts()[inst.name] || '';
+    const ta = $('#create-userdata');
+    if (ta) ta.value = script;
+  }
+  toast('已带入「' + name + '」的配置，可修改后创建', 'ok');
+}
+
+async function onRegionChange() {
+  const region = $('#create-region').value;
+  const box = $('#create-step2');
+  if (!region) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
+  try {
+    const meta = await withBusy(() => loadRegionMeta(region));
+    const bps = meta.blueprints;
+    const linux = bps.filter(b => (b.platform || '').toUpperCase() !== 'WINDOWS');
+    const windows = bps.filter(b => (b.platform || '').toUpperCase() === 'WINDOWS');
+    const bundles = meta.bundles.slice().sort((a, b) => (a.price || 0) - (b.price || 0));
+    const keyOpts = '<option value="">（不绑定密钥对）</option>' + meta.keyPairs.map(k => `<option value="${esc(k.name)}">${esc(k.name)}</option>`).join('');
+    const azOpts = meta.availabilityZones.length
+      ? meta.availabilityZones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join('')
+      : `<option value="${esc(region + 'a')}">${esc(region + 'a')}</option>`;
+
+    box.innerHTML = `
+      <div class="form-card">
+        <div class="field">
+          <label>2. 选择系统（蓝图）</label>
+          <div class="pick-grid" id="create-blueprints">
+            ${linux.map(b => pickCardHTML('blueprint', b.blueprintId, blueprintLabel(b), 'Linux / Unix', b.description || '')).join('')}
+            ${windows.length ? '<div class="field full" style="grid-column:1/-1;margin-top:6px"><label>Windows</label></div>' : ''}
+            ${windows.map(b => pickCardHTML('blueprint', b.blueprintId, blueprintLabel(b), 'Windows', b.description || '', 'win')).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="form-card">
+        <div class="field">
+          <label>3. 选择月租套餐</label>
+          <div class="pick-grid" id="create-bundles">
+            ${bundles.map(b => pickCardHTML('bundle', b.bundleId,
+              `${b.name || b.bundleId}`,
+              `${b.cpuCount || '-'} vCPU · ${b.ramSizeInGb || '-'} GB 内存 · ${b.diskSizeInGb || '-'} GB SSD · ${b.transferPerMonthInGb || b.monthlyTransfer?.gbPerMonthAllocated || '-'} GB/月流量`,
+              b.price != null ? '$' + Number(b.price).toFixed(2) + ' /月' : '',
+              '', true)).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="form-card">
+        <h3>4. 实例信息</h3>
+        <div class="form-grid">
+          <div class="field full">
+            <label>实例名称</label>
+            <input class="input" id="create-names" placeholder="支持一次创建多台，用逗号或空格分隔，如 web-1 web-2（每个 2–255 字符）">
+          </div>
+          <div class="field">
+            <label>可用区</label>
+            <select class="input" id="create-az">${azOpts}</select>
+          </div>
+          <div class="field">
+            <label>密钥对（可选）</label>
+            <select class="input" id="create-key">${keyOpts}</select>
+          </div>
+          <div class="field full">
+            <label>启动脚本（UserData，可选）</label>
+            <textarea class="input" id="create-userdata" rows="6" placeholder="#!/bin/bash&#10;apt-get -y update"></textarea>
+            <div class="hint">创建实例时一次性执行；面板会记住每台实例的脚本</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-accent" id="create-submit" data-region="${esc(region)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            创建实例
+          </button>
+          <span class="hint" style="color:var(--text-3)">创建后按用量计费，价格以 AWS 账单为准</span>
+        </div>
+      </div>`;
+    bindPickCards('blueprint');
+    bindPickCards('bundle');
+    $('#create-submit').addEventListener('click', onCreateInstances);
+  } catch (e) {
+    box.innerHTML = errorBox(e.message);
+  }
+}
+
+function pickCardHTML(type, id, title, desc, price, platClass, showPrice) {
+  return `<div class="pick-card" data-type="${type}" data-value="${esc(id)}">
+    <div class="t">${esc(title)}${price && showPrice ? `<span class="price">${price}</span>` : ''}</div>
+    <div class="d">${esc(desc)}</div>
+  </div>`;
+}
+
+function bindPickCards(type) {
+  const container = type === 'blueprint' ? $('#create-blueprints') : $('#create-bundles');
+  if (!container) return;
+  container.querySelectorAll('.pick-card').forEach(card => {
+    card.addEventListener('click', () => {
+      container.querySelectorAll('.pick-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
+  });
+}
+
+async function onCreateInstances() {
+  const region = $('#create-submit').dataset.region;
+  const selBlueprint = $('#create-blueprints') ? $('#create-blueprints').querySelector('.pick-card.selected') : null;
+  const selBundle = $('#create-bundles') ? $('#create-bundles').querySelector('.pick-card.selected') : null;
+  if (!selBlueprint || !selBundle) { toast('请先选择系统和套餐', 'err'); return; }
+  const blueprintId = selBlueprint.dataset.value;
+  const bundleId = selBundle.dataset.value;
+  const names = splitNames($('#create-names').value);
+  if (!names.length) { toast('请填写至少一个实例名称', 'err'); return; }
+  if (names.some(n => n.length < 2 || n.length > 255)) { toast('实例名称长度需为 2–255 个字符', 'err'); return; }
+  const az = $('#create-az').value.trim();
+  const keyName = $('#create-key').value;
+  const userData = $('#create-userdata').value;
+  if (!az) { toast('请选择可用区', 'err'); return; }
+
+  const meta = state.metaByRegion[region] || {};
+  const bp = (meta.blueprints || []).find(b => b.blueprintId === blueprintId);
+  const bd = (meta.bundles || []).find(b => b.bundleId === bundleId);
+  confirmDialog({
+    title: '确认创建实例',
+    message: `将在区域 <b>${esc(region)}</b> 创建 <b>${names.length}</b> 台实例：<b>${esc(names.join('、'))}</b><br>系统：<b>${esc(bp ? blueprintLabel(bp) : blueprintId)}</b>　套餐：<b>${esc(bd ? (bd.name || bundleId) : bundleId)}</b>${bd && bd.price != null ? '（$' + Number(bd.price).toFixed(2) + '/月）' : ''}<br>创建后立即按用量计费，确定继续？`,
+    confirmText: '创建',
+    onConfirm: async () => {
+      try {
+        await withBusy(() => callAWS('CreateInstances', {
+          instanceNames: names,
+          availabilityZone: az,
+          blueprintId,
+          bundleId,
+          keyPairName: keyName || undefined,
+          userData: userData || undefined
+        }, region));
+        names.forEach(n => saveScript(n, userData));
+        toast('创建请求已提交：' + names.join('、'), 'ok');
+        setTimeout(() => render(), 800);
+      } catch (e) {
+        toast('创建失败：' + e.message, 'err');
+      }
+    }
+  });
+}
+
+async function renderCreate() {
+  const view = $('#view');
+  const cfg = getCreds();
+  if (!cfg || !cfg.configured) {
+    view.innerHTML = `
+      <div class="empty">${ICONS.info}
+        <div class="title">还没有配置 AWS 凭证</div>
+        <div class="desc">创建实例需要读取区域、系统与套餐信息。</div>
+        <a class="btn btn-accent" href="#/settings">前往设置</a>
+      </div>`;
+    return;
+  }
+  if (!state.instances) {
+    try { const { instances } = await withBusy(loadAllInstances); state.instances = instances; }
+    catch (e) { /* 列表失败不阻塞创建页 */ }
+  }
+  renderCreateView();
+}
+
+/* ============================================================
+   视图：设置（凭证）
+   ============================================================ */
+async function renderSettings() {
+  const view = $('#view');
+  const c = getCreds() || {};
+  const legacy = readLegacyCreds();
+  view.innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>设置</h1>
+        <div class="sub">AWS 凭证保存在本机 <code>aws-credentials.json</code> 文件中（浏览器不再保存密钥），仅本机可访问</div>
+      </div>
+    </div>
+
+    ${c.configured ? `
+      <div class="notice" style="max-width:640px">
+        当前已配置：AK 尾号 <b>…${esc(c.accessKeyIdTail || '')}</b> · 区域 <b>${esc(c.region || '')}</b>
+      </div>` : ''}
+
+    ${legacy ? `
+      <div class="info-box" style="max-width:640px;border-color:var(--accent)">
+        <b>检测到浏览器中还存有旧版凭证</b>（localStorage）。<br>
+        为安全起见，请一键迁移到本机文件，迁移后浏览器中的密钥将被清除：
+        <div class="form-actions" style="margin-top:10px">
+          <button class="btn btn-accent" id="set-migrate">一键迁移旧凭证到本机</button>
+        </div>
+        <div id="set-migrate-result"></div>
+      </div>` : ''}
+
+    <div class="form-card" style="max-width:640px">
+      <h3>AWS 凭证</h3>
+      <div class="form-grid">
+        <div class="field full">
+          <label>Access Key ID</label>
+          <input class="input mono" id="set-ak" placeholder="AKIA..." autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field full">
+          <label>Secret Access Key</label>
+          <div style="display:flex;gap:8px">
+            <input class="input mono" id="set-sk" type="password" placeholder="••••••••" autocomplete="off" spellcheck="false" style="flex:1">
+            <button class="btn btn-ghost" id="set-sk-toggle" type="button" title="显示 / 隐藏">显示</button>
+          </div>
+        </div>
+        <div class="field full">
+          <label>主区域（Region，用于测试连接；实例列表自动覆盖所有区域）</label>
+          <select class="input" id="set-region">
+            ${REGIONS.map(r => `<option value="${r}" ${c.region === r ? 'selected' : ''}>${r}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-accent" id="set-save-test">保存到本机并测试连接</button>
+        <button class="btn" id="set-save">仅保存</button>
+        ${c.configured ? '<button class="btn btn-danger" id="set-clear">清除凭证</button>' : ''}
+      </div>
+      <div id="set-result"></div>
+    </div>
+
+    <div class="info-box" style="max-width:640px">
+      <b>如何获取凭证：</b><br>
+      1. 打开 AWS 控制台 → IAM → 用户 → 创建用户（或使用现有用户）；<br>
+      2. 为该用户附加权限策略 <code>AmazonLightsailFullAccess</code>（或自定义最小权限：lightsail:Get* / StartInstance / StopInstance / RebootInstance / OpenInstancePublicPorts / CloseInstancePublicPorts / PutInstancePublicPorts / CreateInstances / DeleteInstance / GetInstanceAccessDetails 等）；<br>
+      3. 进入「安全凭证」→ 创建访问密钥，复制 Access Key ID 与 Secret Access Key 填入上方。<br><br>
+      <b>安全提示：</b>凭证保存在本机 <code>aws-lightsail-panel/aws-credentials.json</code>，签名由本地代理完成；浏览器不再持有密钥。请勿把该文件、页面截图或 AK/SK 发给任何人。若密钥曾泄露（例如出现在截图/聊天中），请到 AWS 控制台删除并重建。
+    </div>
+  `;
+
+  const migrateBtn = $('#set-migrate');
+  if (migrateBtn && legacy) {
+    migrateBtn.addEventListener('click', async () => {
+      const box = $('#set-migrate-result');
+      box.innerHTML = `<div class="empty" style="padding:14px"><div class="spinner" style="margin:0 auto"></div></div>`;
+      try {
+        await saveCredsToServer(legacy);
+        box.innerHTML = `<div class="notice" style="margin:0">迁移完成：凭证已保存到本机文件，浏览器中的旧密钥已清除。</div>`;
+        toast('迁移完成，浏览器旧密钥已清除', 'ok');
+        renderSettings();
+      } catch (e) {
+        box.innerHTML = errorBox('迁移失败：' + e.message);
+      }
+    });
+  }
+
+  $('#set-sk-toggle').addEventListener('click', () => {
+    const input = $('#set-sk');
+    const isPwd = input.type === 'password';
+    input.type = isPwd ? 'text' : 'password';
+    $('#set-sk-toggle').textContent = isPwd ? '隐藏' : '显示';
+  });
+
+  const save = async (test) => {
+    const ak = $('#set-ak').value.trim();
+    const sk = $('#set-sk').value.trim();
+    const region = $('#set-region').value;
+    if (!ak || !sk) { toast('请填写 Access Key 和 Secret Key', 'err'); return; }
+    const box = $('#set-result');
+    box.innerHTML = `<div class="empty" style="padding:20px"><div class="spinner" style="margin:0 auto"></div></div>`;
+    try {
+      await saveCredsToServer({ accessKeyId: ak, secretAccessKey: sk, region });
+    } catch (e) {
+      box.innerHTML = errorBox('保存失败：' + e.message);
+      toast('保存失败', 'err');
+      return;
+    }
+    if (test) {
+      try {
+        await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }));
+        box.innerHTML = `<div class="notice" style="margin:0">已保存到本机文件，连接成功：凭证有效，可以管理所有区域的 Lightsail 实例。</div>`;
+        toast('凭证有效，连接成功', 'ok');
+      } catch (e) {
+        box.innerHTML = errorBox('已保存，但连接失败：' + e.message);
+        toast('已保存，连接失败', 'err');
+      }
+    } else {
+      box.innerHTML = `<div class="notice" style="margin:0">已保存到本机文件 aws-credentials.json。</div>`;
+      toast('凭证已保存到本机', 'ok');
+    }
+    updateCredsBadge();
+  };
+  $('#set-save').addEventListener('click', () => save(false));
+  $('#set-save-test').addEventListener('click', () => save(true));
+  const clearBtn = $('#set-clear');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      confirmDialog({
+        title: '清除凭证',
+        message: '确定要清除本机保存的 AWS 凭证吗？（将删除 aws-credentials.json 文件）',
+        confirmText: '清除',
+        danger: true,
+        onConfirm: async () => {
+          try {
+            await clearCredsOnServer();
+            toast('凭证已清除', 'ok');
+          } catch (e) { toast('清除失败：' + e.message, 'err'); }
+          renderSettings();
+        }
+      });
+    });
+  }
+}
+
+/* ============================================================
+   在线 SSH（浏览器终端）
+   ============================================================ */
+let sshState = { ws: null, term: null, fit: null, host: null, username: null };
+
+function getWsUrl() {
+  return location.protocol === 'file:' ? 'ws://localhost:8080/ws' : 'ws://' + location.host + '/ws';
+}
+
+function setSshStatus(text, cls) {
+  const el = $('#ssh-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'ssh-sub' + (cls ? ' ' + cls : '');
+}
+
+/* 私钥格式诊断：只显示头部行与长度，不暴露私钥内容 */
+function keyDiag(key) {
+  if (!key) return '空';
+  const first = String(key).split(/\r?\n/)[0].trim();
+  const head = first.length > 40 ? first.slice(0, 40) + '…' : first;
+  const note = /^-----BEGIN PRIVATE KEY-----/.test(head) ? '｜ PKCS#8，服务端已自动转换' : '';
+  return head + '（长度 ' + String(key).length + '）' + note;
+}
+
+function closeSSH() {
+  if (sshState.ws) {
+    try { sshState.ws.send(JSON.stringify({ type: 'disconnect' })); } catch (e) { /* noop */ }
+    try { sshState.ws.close(); } catch (e) { /* noop */ }
+  }
+  sshState.ws = null;
+  if (sshState.term) { try { sshState.term.dispose(); } catch (e) { /* noop */ } sshState.term = null; }
+  sshState.fit = null;
+  sshState.host = null;
+  sshState.username = null;
+  $('#modal-root').classList.remove('show');
+}
+
+function resizeSSH() {
+  if (sshState.fit && sshState.ws && sshState.term) {
+    try {
+      sshState.fit.fit();
+      const dims = sshState.fit.proposeDimensions();
+      if (dims) sshState.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+    } catch (e) { /* noop */ }
+  }
+}
+
+async function openSSH(name, region) {
+  const root = $('#modal-root');
+  root.innerHTML = `
+    <div class="modal-mask" data-close="1"></div>
+    <div class="modal ssh-modal" role="dialog" aria-modal="true">
+      <div class="ssh-head">
+        <div>
+          <strong>在线 SSH</strong>
+          <span class="ssh-sub" id="ssh-status">正在获取访问凭证…</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" id="ssh-resize" title="重新适配终端尺寸">适配</button>
+          <button class="btn btn-ghost btn-sm" data-close="1">关闭</button>
+        </div>
+      </div>
+      <div class="ssh-body"><div id="ssh-terminal"></div></div>
+    </div>`;
+  root.classList.add('show');
+  root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeSSH));
+  $('#ssh-resize').addEventListener('click', resizeSSH);
+
+  let access;
+  try {
+    const data = await callAWS('GetInstanceAccessDetails', { instanceName: name, protocol: 'ssh' }, region);
+    access = (data && data.accessDetails) || null;
+  } catch (e) {
+    setSshStatus('获取访问凭证失败：' + e.message, 'error');
+    return;
+  }
+  if (!access || !access.privateKey) {
+    setSshStatus('该实例没有可用的 SSH 私钥（可能是 Windows 实例，请使用远程桌面；或检查 IAM 权限 lightsail:GetInstanceAccessDetails）', 'error');
+    return;
+  }
+  const host = access.ipAddress;
+  const username = access.username || 'ec2-user';
+  if (!host) { setSshStatus('实例没有公网 IP，无法连接', 'error'); return; }
+  sshState.host = host;
+  sshState.username = username;
+  setSshStatus('正在连接 ' + username + '@' + host + ' …');
+
+  // 初始化 xterm
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: 'ui-monospace, Consolas, "Courier New", monospace',
+    theme: { background: '#0b0f14', foreground: '#d8e0e8', cursor: '#ff9900', selectionBackground: '#2c5275' },
+    scrollback: 5000
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  sshState.term = term;
+  sshState.fit = fit;
+  term.open(document.getElementById('ssh-terminal'));
+  try { fit.fit(); } catch (e) { /* noop */ }
+
+  let ws;
+  try {
+    ws = new WebSocket(getWsUrl());
+  } catch (e) {
+    setSshStatus('无法创建 WebSocket 连接', 'error');
+    return;
+  }
+  sshState.ws = ws;
+
+  ws.onopen = () => {
+    let dims = { cols: 80, rows: 24 };
+    try { const p = fit.proposeDimensions(); if (p) dims = p; } catch (e) { /* noop */ }
+    ws.send(JSON.stringify({
+      type: 'connect',
+      host,
+      port: 22,
+      username,
+      privateKey: access.privateKey,
+      certKey: access.certKey || '',
+      term: 'xterm-256color',
+      cols: dims.cols,
+      rows: dims.rows
+    }));
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    if (msg.type === 'connected') setSshStatus('已连接，正在打开 shell…');
+    else if (msg.type === 'shell-ready') setSshStatus('已连接 ' + username + '@' + host, 'connected');
+    else if (msg.type === 'data') { try { term.write(msg.data); } catch (e) { /* noop */ } }
+    else if (msg.type === 'error') setSshStatus(msg.message + ' ｜ 私钥格式：' + keyDiag(access.privateKey), 'error');
+    else if (msg.type === 'exit') setSshStatus('连接已关闭', 'error');
+  };
+  ws.onclose = () => { sshState.ws = null; setSshStatus('连接已关闭', 'error'); };
+  ws.onerror = () => { setSshStatus('WebSocket 连接失败，请确认本地代理在运行', 'error'); };
+
+  term.onData((data) => {
+    if (sshState.ws && sshState.ws.readyState === WebSocket.OPEN) {
+      sshState.ws.send(JSON.stringify({ type: 'data', data }));
+    }
+  });
+  window.addEventListener('resize', resizeSSH);
+  setTimeout(resizeSSH, 200);
+}
+
+/* ============================================================
+   操作：开机 / 关机 / 重启 / 端口
+   ============================================================ */
+const POWER_OPS = {
+  start: { api: 'StartInstance', title: '开机', verb: '开机', warn: false },
+  stop: { api: 'StopInstance', title: '关机', verb: '关机', warn: true },
+  reboot: { api: 'RebootInstance', title: '重启', verb: '重启', warn: true }
+};
+
+function doPowerAction(action, name, region) {
+  const op = POWER_OPS[action];
+  if (!op) return;
+  confirmDialog({
+    title: op.title + '实例',
+    message: `确定要${op.verb}实例 <b>${esc(name)}</b>（区域 ${esc(region)}）吗？${action === 'stop' ? '<br><br><span style="color:var(--warn)">关机后该实例将无法访问，且停机期间仍会收取存储费用。</span>' : ''}${action === 'reboot' ? '<br><br>重启大约需要 1–2 分钟，期间实例不可访问。' : ''}`,
+    confirmText: op.verb,
+    danger: op.warn,
+    onConfirm: async () => {
+      try {
+        await withBusy(() => callAWS(op.api, { instanceName: name }, region));
+        toast(op.title + '请求已提交（状态同步可能需要 30–60 秒）', 'ok');
+        setTimeout(() => render(), 1200);
+      } catch (e) {
+        toast(op.title + '失败：' + e.message, 'err');
+      }
+    }
+  });
+}
+
+function doDeleteInstance(name, region) {
+  confirmDialog({
+    title: '删除实例',
+    message: `将<strong style="color:var(--danger)">永久删除</strong>实例 <b>${esc(name)}</b>（区域 ${esc(region)}）。<br><br>删除后<strong>不可恢复</strong>：公网 IP 将被释放、磁盘数据全部丢失、绑定的静态 IP 也会被一并删除。确定要继续吗？`,
+    confirmText: '永久删除',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await withBusy(() => callAWS('DeleteInstance', { instanceName: name }, region));
+        toast('删除指令已提交，正在删除实例…', 'ok');
+        setTimeout(() => { location.hash = '#/instances'; render(); }, 1500);
+      } catch (e) {
+        toast('删除失败：' + e.message, 'err');
+      }
+    }
+  });
+}
+
+/* 一键开放全部 IPv4 / IPv6 端口（TCP+UDP 0-65535 + ICMP），与现有规则合并去重后覆盖写入 */
+function buildAllPortRules(v4) {
+  const base = [
+    { protocol: 'tcp', fromPort: 0, toPort: 65535 },
+    { protocol: 'udp', fromPort: 0, toPort: 65535 },
+    { protocol: 'icmp', fromPort: -1, toPort: -1 }
+  ];
+  return base.map(r => v4 ? { ...r, cidrs: ['0.0.0.0/0'] } : { ...r, ipv6Cidrs: ['::/0'] });
+}
+function mergePortRules(existing, added) {
+  const key = (r) => {
+    const c = (r.cidrs || []).join(',');
+    const v6 = (r.ipv6Cidrs || []).join(',');
+    return [r.protocol, r.fromPort, r.toPort, c, v6].join('|');
+  };
+  const seen = new Set(existing.map(key));
+  const out = existing.map(r => ({
+    fromPort: r.fromPort, toPort: r.toPort, protocol: r.protocol,
+    cidrs: r.cidrs || undefined, ipv6Cidrs: r.ipv6Cidrs || undefined
+  }));
+  for (const r of added) {
+    if (!seen.has(key(r))) { out.push(r); seen.add(key(r)); }
+  }
+  return out;
+}
+function doOpenAllPorts(name, region, kind) {
+  const v4 = kind === 'v4';
+  const label = v4 ? '全部 IPv4' : '全部 IPv6';
+  const cidr = v4 ? '0.0.0.0/0（所有 IPv4）' : '::/0（所有 IPv6）';
+  confirmDialog({
+    title: '一键开放' + label + '端口',
+    message: `将为实例 <b>${esc(name)}</b> 添加入站规则：<b>TCP + UDP（0–65535）+ ICMP</b>，来源：<b>${esc(cidr)}</b>（与现有规则合并，不重复）。<br><br><span style="color:var(--warn)">开放全部端口意味着任何来源都能访问该实例的所有端口，存在安全风险，建议仅临时使用。</span>确认开放？`,
+    confirmText: '确认开放',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        const existing = state.detail.ports || [];
+        const merged = mergePortRules(existing, buildAllPortRules(v4));
+        await withBusy(() => callAWS('PutInstancePublicPorts', { instanceName: name, portInfos: merged }, region));
+        toast('已提交：开放' + label + '端口（30–60 秒生效）', 'ok');
+        setTimeout(() => renderInstanceDetail(name, region), 1500);
+      } catch (e) {
+        toast('操作失败：' + e.message, 'err');
+      }
+    }
+  });
+}
+
+/* 实时监控已移除：Lightsail 官方指标非实时（分钟级延迟），用户确认无意义后删除 */
+
+function doOpenPort(instanceName, region) {
+  const protocol = $('#port-protocol').value;
+  let from = parseInt($('#port-from').value, 10);
+  let to = parseInt($('#port-to').value, 10);
+  if (protocol === 'icmp') { from = to = -1; }
+  else {
+    if (isNaN(from) || isNaN(to)) { toast('请填写端口号', 'err'); return; }
+    if (from < 1 || to > 65535 || from > to) { toast('端口范围无效：需在 1–65535 之间且起始 ≤ 结束', 'err'); return; }
+  }
+  const { cidrs, ipv6Cidrs } = parseCidrs($('#port-cidr').value);
+  if (!cidrs && !ipv6Cidrs) { toast('请填写来源 CIDR（默认可填 0.0.0.0/0）', 'err'); return; }
+  const portInfo = { fromPort: from, toPort: to, protocol, cidrs, ipv6Cidrs };
+  confirmDialog({
+    title: '开放端口',
+    message: `将为实例 <b>${esc(instanceName)}</b> 开放端口 <b>${protocol.toUpperCase()} ${from === to ? from : from + '-' + to}</b>，来源：<b>${esc((cidrs || []).concat(ipv6Cidrs || []).join(', '))}</b>。确认？`,
+    confirmText: '开放',
+    onConfirm: async () => {
+      try {
+        await withBusy(() => callAWS('OpenInstancePublicPorts', { instanceName, portInfo }, region));
+        toast('端口已开放', 'ok');
+        setTimeout(() => render(), 900);
+      } catch (e) { toast('开放端口失败：' + e.message, 'err'); }
+    }
+  });
+}
+
+function doSaveAllPorts(instanceName, region) {
+  const portInfos = state.detail.ports.map(p => {
+    const info = { fromPort: p.fromPort, toPort: p.toPort, protocol: p.protocol };
+    if (p.cidrs && p.cidrs.length) info.cidrs = p.cidrs;
+    if (p.ipv6Cidrs && p.ipv6Cidrs.length) info.ipv6Cidrs = p.ipv6Cidrs;
+    if (p.cidrListAliases && p.cidrListAliases.length) info.cidrListAliases = p.cidrListAliases;
+    return info;
+  });
+  confirmDialog({
+    title: '应用防火墙规则',
+    message: `将把实例 <b>${esc(instanceName)}</b> 的入站规则整体替换为 <b>${portInfos.length}</b> 条（覆盖式写入，全部规则以当前列表为准）。确认？`,
+    confirmText: '应用',
+    onConfirm: async () => {
+      try {
+        await withBusy(() => callAWS('PutInstancePublicPorts', { instanceName, portInfos }, region));
+        toast('防火墙规则已应用', 'ok');
+        state.detail.editingIdx = -1;
+        setTimeout(() => render(), 900);
+      } catch (e) { toast('应用失败：' + e.message, 'err'); }
+    }
+  });
+}
+
+function collectEditedRow() {
+  const row = Array.from(document.querySelectorAll('#view tr')).find(tr => tr.querySelector('[data-edit-field]'));
+  if (!row) return null;
+  const get = (f) => row.querySelector(`[data-edit-field="${f}"]`);
+  const protocol = get('protocol') ? get('protocol').value : 'tcp';
+  let from = get('fromPort') ? parseInt(get('fromPort').value, 10) : NaN;
+  let to = get('toPort') ? parseInt(get('toPort').value, 10) : NaN;
+  if (protocol === 'icmp') { from = to = -1; }
+  const { cidrs, ipv6Cidrs } = parseCidrs(get('cidrs') ? get('cidrs').value : '');
+  return { fromPort: from, toPort: to, protocol, cidrs, ipv6Cidrs };
+}
+
+function doEditPort(idx) {
+  state.detail.editingIdx = idx;
+  renderInstanceDetailView();
+}
+
+function doCancelEditPort() {
+  state.detail.editingIdx = -1;
+  renderInstanceDetailView();
+}
+
+function doSavePort(idx, instanceName, region) {
+  const edited = collectEditedRow();
+  if (!edited) { toast('未找到编辑中的规则', 'err'); return; }
+  if (edited.protocol !== 'icmp') {
+    if (isNaN(edited.fromPort) || isNaN(edited.toPort) || edited.fromPort < 1 || edited.toPort > 65535 || edited.fromPort > edited.toPort) {
+      toast('端口范围无效：需在 1–65535 之间且起始 ≤ 结束', 'err'); return;
+    }
+  }
+  state.detail.ports[idx] = Object.assign({}, state.detail.ports[idx], edited);
+  state.detail.editingIdx = -1;
+  renderInstanceDetailView();
+  toast('已修改规则，记得点「保存全部修改」生效', 'warn');
+}
+
+function doAddPort() {
+  state.detail.ports.push({ fromPort: 8080, toPort: 8080, protocol: 'tcp', cidrs: ['0.0.0.0/0'] });
+  state.detail.editingIdx = state.detail.ports.length - 1;
+  renderInstanceDetailView();
+}
+
+function doRemovePort(idx) {
+  confirmDialog({
+    title: '移除规则',
+    message: '将从规则列表移除该条（保存全部修改后生效）。确认？',
+    confirmText: '移除',
+    danger: true,
+    onConfirm: () => {
+      state.detail.ports.splice(idx, 1);
+      if (state.detail.editingIdx >= state.detail.ports.length) state.detail.editingIdx = -1;
+      renderInstanceDetailView();
+    }
+  });
+}
+
+/* 重新渲染详情视图（保持当前详情数据，不重新请求 AWS） */
+function renderInstanceDetailView() {
+  if (state.detail && state.detail._inst) renderDetailHTML(state.detail._inst);
+  else render();
+}
+
+/* ============================================================
+   渲染入口 + 事件委托
+   ============================================================ */
+async function render() {
+  const { path, params } = parseHash();
+  if (path === 'oci') { $('#topbar-title').textContent = '甲骨文 OCI'; updateCredsBadge(); return; }
+  await loadAwsConfig();
+  const titles = { instances: '实例', create: '创建实例', settings: '设置' };
+  $('#topbar-title').textContent = titles[path] || '实例';
+  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === (titles[path] === undefined ? 'instances' : path)));
+  updateCredsBadge();
+
+  if (path === 'instances') await renderInstances();
+  else if (path === 'instance') await renderInstanceDetail(params.get('name'), params.get('region') || (getCreds() && getCreds().region));
+  else if (path === 'create') await renderCreate();
+  else if (path === 'settings') await renderSettings();
+  else location.hash = '#/instances';
+}
+
+document.addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('[data-copy]');
+  if (copyBtn) {
+    const v = copyBtn.dataset.copy;
+    if (v) {
+      copyText(v).then(ok => toast(ok ? '已复制：' + v : '复制失败，请手动选择复制', ok ? 'ok' : 'err'));
+    }
+    return;
+  }
+  const trigger = e.target.closest('[data-action]');
+  if (!trigger) return;
+  const { action, name, region, idx } = trigger.dataset;
+  if (action === 'open-instance') {
+    location.hash = '#/instance?name=' + encodeURIComponent(name) + '&region=' + encodeURIComponent(region || (getCreds() && getCreds().region));
+  }
+  else if (action === 'ssh') openSSH(name, region);
+  else if (action === 'start' || action === 'stop' || action === 'reboot') doPowerAction(action, name, region);
+  else if (action === 'delete') doDeleteInstance(name, region);
+  else if (action === 'open-all-v4') doOpenAllPorts(name, region, 'v4');
+  else if (action === 'open-all-v6') doOpenAllPorts(name, region, 'v6');
+  else if (action === 'open-port') doOpenPort(name, region);
+  else if (action === 'edit-port') doEditPort(parseInt(idx, 10));
+  else if (action === 'cancel-edit-port') doCancelEditPort();
+  else if (action === 'save-port') doSavePort(parseInt(idx, 10), name, region);
+  else if (action === 'add-port') doAddPort();
+  else if (action === 'remove-port') doRemovePort(parseInt(idx, 10));
+  else if (action === 'save-all-ports') doSaveAllPorts(name, region);
+});
+
+$('#btn-refresh').addEventListener('click', () => render());
+$('#btn-test-conn').addEventListener('click', async () => {
+  const cfg = getCreds();
+  if (!cfg || !cfg.configured) { toast('请先配置凭证', 'warn'); location.hash = '#/settings'; return; }
+  try {
+    await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }));
+    toast('连接成功：凭证有效', 'ok');
+  } catch (e) { toast('连接失败：' + e.message, 'err'); }
+});
+window.addEventListener('hashchange', () => render());
+
+/* 协议切换时调整端口输入 */
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'port-protocol') {
+    const icmp = e.target.value === 'icmp';
+    $('#port-from').disabled = icmp;
+    $('#port-to').disabled = icmp;
+    $('#port-from').value = icmp ? '' : '8080';
+    $('#port-to').value = icmp ? '' : '8080';
+    $('#port-range-hint').textContent = icmp ? 'ICMP 无端口概念，将使用 -1' : 'TCP/UDP：1 – 65535';
+  }
+});
+
+/* 详情页编辑行内：协议切换时启用/禁用端口输入 */
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.dataset && e.target.dataset.editField === 'protocol') {
+    const icmp = e.target.value === 'icmp';
+    const row = e.target.closest('tr');
+    if (!row) return;
+    const from = row.querySelector('[data-edit-field="fromPort"]');
+    const to = row.querySelector('[data-edit-field="toPort"]');
+    if (from) from.disabled = icmp;
+    if (to) to.disabled = icmp;
+  }
+});
+
+// 先检查登录态：已登录（cookie 会话有效）才初始化面板；未登录只显示登录层
+Auth.init().then(function (authed) {
+  if (!authed) return;
+  render();
+});
+
+/* ============================================================
+   甲骨文 OCI 面板模块（纯前端，后端走 /api/oci/*）
+   ============================================================ */
+window.OciPanel = (function () {
+  'use strict';
+  var instances = [];
+  var busyIds = new Set();
+  var refreshTimer = null;
+  var inited = false;
+  function $q(s) { return document.querySelector(s); }
+  function $qa(s) { return Array.from(document.querySelectorAll(s)); }
+  function escO(v) { return esc(v); }
+  function ociToast(msg, isErr) { toast(msg, isErr ? 'error' : 'info'); }
+
+  async function api(path, opts) {
+    var res;
+    try {
+      res = await fetch('/api/oci' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    } catch (e) {
+      throw new Error('无法连接服务，请确认后端已启动');
+    }
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (data && data.ok === false) throw new Error(data.message || '操作失败');
+    if (!data) throw new Error('服务返回异常（HTTP ' + res.status + '）');
+    return data;
+  }
+
+  var STATE_MAP = {
+    RUNNING: ['running', '运行中'],
+    STOPPED: ['stopped', '已停止'],
+    STARTING: ['pending', '启动中'],
+    STOPPING: ['pending', '停止中'],
+    PROVISIONING: ['pending', '创建中'],
+    TERMINATING: ['pending', '终止中'],
+    TERMINATED: ['unknown', '已终止'],
+  };
+  function stateBadge(state) {
+    var m = STATE_MAP[state] || ['unknown', state];
+    return '<span class="inst-state ' + m[0] + '">' + escO(m[1]) + '</span>';
+  }
+
+  function showListMsg(text) {
+    var el = $q('#oci-list-msg');
+    el.textContent = text;
+    el.classList.remove('hidden');
+  }
+
+  async function loadInstances(silent) {
+    try {
+      var data = await api('/instances');
+      instances = data.instances || [];
+      $q('#oci-list-msg').classList.add('hidden');
+      renderInstances();
+    } catch (e) {
+      instances = [];
+      renderInstances();
+      var msg = /配置|凭证/.test(e.message) ? '尚未配置 API 凭证，请先到「设置」填写并保存。' : '加载失败：' + e.message;
+      if (!silent) ociToast(msg, true);
+      showListMsg(msg);
+    }
+  }
+
+  function renderInstances() {
+    var tbody = $q('#oci-inst-body');
+    if (!instances.length) { tbody.innerHTML = ''; return; }
+    $q('#oci-list-msg').classList.add('hidden');
+    tbody.innerHTML = instances.map(function (it) {
+      var busy = busyIds.has(it.id);
+      var running = it.state === 'RUNNING';
+      var start = running ? '' : '<button class="btn btn-sm" data-act="start" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>开机</button>';
+      var stop = running ? '<button class="btn btn-sm" data-act="stop" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>关机</button>' : '';
+      var reboot = running ? '<button class="btn btn-sm" data-act="reboot" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>重启</button>' : '';
+      var swip = '<button class="btn btn-sm" data-act="switch-ip" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>切换 IP</button>';
+      var ports = '<button class="btn btn-sm btn-danger" data-act="open-ports" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>开放端口</button>';
+      var rules = '<button class="btn btn-sm" data-act="rules" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>规则</button>';
+      var spec = it.ocpus != null ? (it.ocpus + ' OCPU / ' + it.memory_in_gbs + ' GB') : escO(it.shape);
+      return '<tr>' +
+        '<td><div class="inst-name">' + escO(it.display_name) + '</div><div class="inst-sub">' + escO(it.shape) + '</div></td>' +
+        '<td>' + stateBadge(it.state) + '</td>' +
+        '<td>' + spec + '</td>' +
+        '<td>' + escO(it.public_ip || '—') + '</td>' +
+        '<td>' + escO(it.private_ip || '—') + '</td>' +
+        '<td>' + ((it.ipv6 || []).map(escO).join('<br>') || '—') + '</td>' +
+        '<td class="ops">' + start + stop + reboot + swip + ports + rules + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function setBusy(id, val) { if (val) busyIds.add(id); else busyIds.delete(id); renderInstances(); }
+
+  async function doAction(id, action, label) {
+    setBusy(id, true);
+    try {
+      await api('/instances/' + encodeURIComponent(id) + '/action', { method: 'POST', body: JSON.stringify({ action: action }) });
+      ociToast('已触发' + label + '，正在生效…');
+      setTimeout(function () { loadInstances(true); }, 3000);
+    } catch (e) {
+      ociToast(e.message, true);
+      loadInstances(true);
+    } finally {
+      setBusy(id, false);
+    }
+  }
+
+  function doSwitchIp(id, inst) {
+    if (!inst) return;
+    confirmDialog({
+      title: '切换公网 IP',
+      message: '确定要为 <b>' + escO(inst.display_name) + '</b> 更换【公网 IPv4】？<br><br>· 将释放当前临时公网 IPv4（<b>' + escO(inst.public_ip || '无') + '</b>）并分配一个新 IPv4<br>· 更换期间连接会短暂中断（几秒 ~ 几十秒）<br>· IPv6 地址不受影响<br>· 仅支持临时公网 IP；保留 IP（Reserved）无法自动更换',
+      confirmText: '确定更换',
+      danger: true,
+      onConfirm: function () {
+        setBusy(id, true);
+        api('/instances/' + encodeURIComponent(id) + '/switch-ip', { method: 'POST' })
+          .then(function (d) { ociToast(d.message || '更换成功'); })
+          .catch(function (e) { ociToast(e.message, true); })
+          .finally(function () { setBusy(id, false); setTimeout(function () { loadInstances(true); }, 2000); });
+      }
+    });
+  }
+
+  function closeModalRoot() { $q('#modal-root').classList.remove('show'); }
+  document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('#modal-root .modal-mask')) closeModalRoot();
+    if (e.target.closest && e.target.closest('#modal-root [data-close]')) closeModalRoot();
+  });
+
+  /* ---------- 开放端口弹窗 ---------- */
+  function openPortsModal(id, inst) {
+    var root = $q('#modal-root');
+    root.innerHTML = '' +
+      '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal" style="width:560px;max-width:94vw" role="dialog">' +
+      '<h3>开放端口 - ' + escO(inst ? inst.display_name : '') + '</h3>' +
+      '<div class="msg" style="margin-top:10px">' +
+      '<label class="oci-radio"><input type="radio" name="pmode" value="all" checked> 全部端口（放行 0.0.0.0/0 与 ::/0 的所有协议，入站）</label>' +
+      '<label class="oci-radio"><input type="radio" name="pmode" value="custom"> 自定义端口</label>' +
+      '<div id="oci-custom-fields" style="display:none;margin-top:10px">' +
+      '<div class="oci-frow">' +
+      '<label>协议<select id="p-protocol"><option value="TCP">TCP</option><option value="UDP">UDP</option><option value="ICMP">ICMP</option><option value="ALL">ALL（所有协议）</option></select></label>' +
+      '<label>方向<select id="p-direction"><option value="INGRESS">入站（公网 → 实例）</option><option value="EGRESS">出站（实例 → 公网）</option></select></label>' +
+      '</div>' +
+      '<label>端口（多个用逗号，范围用 -，如 22,443,8000-9000；协议选 ALL 或 ICMP 时可不填）<input id="p-ports" type="text" placeholder="22,443,8000-9000"></label>' +
+      '<label>来源/目标 CIDR<input id="p-source" type="text" value="0.0.0.0/0"></label>' +
+      '</div>' +
+      '</div>' +
+      '<div class="actions">' +
+      '<button class="btn" data-close="1">取消</button>' +
+      '<button id="oci-btn-port-confirm" class="btn btn-accent">确认开放</button>' +
+      '</div>' +
+      '</div>';
+    root.classList.add('show');
+
+    root.querySelectorAll('input[name="pmode"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        root.querySelector('#oci-custom-fields').style.display = r.value === 'custom' ? '' : 'none';
+      });
+    });
+    root.querySelector('#oci-btn-port-confirm').addEventListener('click', function () {
+      var mode = root.querySelector('input[name="pmode"]:checked').value;
+      var body = {
+        mode: mode,
+        protocol: root.querySelector('#p-protocol').value,
+        direction: root.querySelector('#p-direction').value,
+        source: root.querySelector('#p-source').value.trim() || '0.0.0.0/0',
+        ports: root.querySelector('#p-ports').value.trim(),
+      };
+      var warn = mode === 'all'
+        ? '确定要为「' + (inst ? inst.display_name : '') + '」开放全部端口？\n（0.0.0.0/0 与 ::/0 所有协议，公网可访问所有端口）'
+        : '确定要为「' + (inst ? inst.display_name : '') + '」开放以下端口？\n协议 ' + body.protocol + ' / 端口 ' + (body.ports || '不限') + ' / ' + (body.direction === 'INGRESS' ? '来源' : '目标') + ' ' + body.source;
+      if (!window.confirm(warn)) return;
+      setBusy(id, true);
+      api('/instances/' + encodeURIComponent(id) + '/open-ports', { method: 'POST', body: JSON.stringify(body) })
+        .then(function (d) { ociToast(d.message || '已完成'); closeModalRoot(); })
+        .catch(function (e) { ociToast(e.message, true); })
+        .finally(function () { setBusy(id, false); });
+    });
+  }
+
+  /* ---------- 规则查看 ---------- */
+  function ruleRowSL(r) {
+    var who = r.direction === 'EGRESS' ? (r.destination || '—') : (r.source || '—');
+    return '<tr><td>' + escO(r.protocol) + '</td><td>' + escO(who) + '</td><td>' + escO(r.ports || '—') + '</td><td>' + (r.stateless ? '是' : '否') + '</td><td>' + escO(r.description || '') + '</td></tr>';
+  }
+  function ruleRowNSG(r) {
+    var who = r.direction === 'EGRESS' ? (r.destination || '—') : (r.source || '—');
+    return '<tr><td>' + (r.direction === 'EGRESS' ? '出站' : '入站') + '</td><td>' + escO(r.protocol) + '</td><td>' + escO(who) + '</td><td>' + escO(r.ports || '—') + '</td><td>' + (r.stateless ? '是' : '否') + '</td><td>' + escO(r.description || '') + '</td></tr>';
+  }
+  function renderRules(data) {
+    var parts = [];
+    if (!data.security_lists.length && !data.nsgs.length) return '<p class="oci-tip">未找到安全列表或网络安全组规则。</p>';
+    data.security_lists.forEach(function (sl) {
+      var inRows = sl.ingress.map(ruleRowSL).join('') || '<tr><td colspan="5">（无入站规则）</td></tr>';
+      var outRows = sl.egress.map(ruleRowSL).join('') || '<tr><td colspan="5">（无出站规则）</td></tr>';
+      parts.push('<div class="oci-rule-block"><h4>' + escO(sl.display_name) + ' <span style="color:var(--text-3);font-weight:400;font-size:12px">（子网 ' + escO(sl.subnet || '') + '）</span></h4>' +
+        '<h5>入站 Ingress（公网 → 实例）</h5><table class="table"><thead><tr><th>协议</th><th>来源</th><th>端口</th><th>无状态</th><th>描述</th></tr></thead><tbody>' + inRows + '</tbody></table>' +
+        '<h5>出站 Egress（实例 → 公网）</h5><table class="table"><thead><tr><th>协议</th><th>目标</th><th>端口</th><th>无状态</th><th>描述</th></tr></thead><tbody>' + outRows + '</tbody></table></div>');
+    });
+    data.nsgs.forEach(function (nsg) {
+      var rows = nsg.rules.map(ruleRowNSG).join('') || '<tr><td colspan="6">（无规则）</td></tr>';
+      parts.push('<div class="oci-rule-block"><h4>网络安全组 NSG：<span style="font-family:var(--mono);font-size:12px">' + escO(nsg.id.slice(0, 24)) + '…</span></h4>' +
+        '<table class="table"><thead><tr><th>方向</th><th>协议</th><th>来源/目标</th><th>端口</th><th>无状态</th><th>描述</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+    });
+    return parts.join('');
+  }
+  function doRules(id, inst) {
+    var root = $q('#modal-root');
+    root.innerHTML = '' +
+      '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal" style="width:880px;max-width:94vw" role="dialog">' +
+      '<h3>安全规则 - ' + escO(inst ? inst.display_name : '') + '</h3>' +
+      '<div class="msg" id="oci-rules-body" style="margin-top:10px;max-height:60vh;overflow:auto">加载中…</div>' +
+      '<div class="actions"><button class="btn" data-close="1">关闭</button></div>' +
+      '</div>';
+    root.classList.add('show');
+    api('/instances/' + encodeURIComponent(id) + '/rules')
+      .then(function (d) { root.querySelector('#oci-rules-body').innerHTML = renderRules(d); })
+      .catch(function (e) { root.querySelector('#oci-rules-body').innerHTML = '<p class="oci-tip">加载失败：' + escO(e.message) + '</p>'; });
+  }
+
+  /* ---------- 事件委托 ---------- */
+  $q('#oci-inst-body').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-act]');
+    if (!btn || btn.disabled) return;
+    var act = btn.dataset.act;
+    var id = btn.dataset.id;
+    var inst = instances.find(function (i) { return i.id === id; });
+    if (act === 'start') doAction(id, 'START', '开机');
+    else if (act === 'stop') doAction(id, 'SOFTSTOP', '关机');
+    else if (act === 'reboot') doAction(id, 'SOFTRESET', '重启');
+    else if (act === 'switch-ip') doSwitchIp(id, inst);
+    else if (act === 'open-ports') openPortsModal(id, inst);
+    else if (act === 'rules') doRules(id, inst);
+  });
+
+  /* ---------- 设置 ---------- */
+  var FIELD_MAP = { oci_tenancy: 'tenancy_ocid', oci_user: 'user_ocid', oci_fingerprint: 'fingerprint', oci_region: 'region', oci_compartment: 'compartment_ocid', oci_key_file: 'key_file' };
+  async function loadSettings() {
+    try {
+      var d = await api('/config');
+      Object.keys(FIELD_MAP).forEach(function (idKey) {
+        var el = $q('#' + idKey);
+        if (el) el.value = d[FIELD_MAP[idKey]] || '';
+      });
+      var hint = $q('#oci-key-hint');
+      if (d.has_key_content) {
+        hint.textContent = '✅ 已配置私钥内容（出于安全考虑不回显，重新填写将覆盖）。';
+        $q('#oci-key-content').placeholder = '（已保存私钥，重新填写将覆盖原私钥）';
+      } else {
+        hint.textContent = '';
+        $q('#oci-key-content').placeholder = '-----BEGIN PRIVATE KEY-----\n...整段粘贴，或留空使用上面的文件路径...';
+      }
+    } catch (e) {
+      ociToast(e.message, true);
+    }
+  }
+
+  $q('#oci-btn-save').addEventListener('click', async function () {
+    var body = {
+      tenancy_ocid: $q('#oci-tenancy').value.trim(),
+      user_ocid: $q('#oci-user').value.trim(),
+      fingerprint: $q('#oci-fingerprint').value.trim(),
+      region: $q('#oci-region').value.trim(),
+      compartment_ocid: $q('#oci-compartment').value.trim(),
+      key_file: $q('#oci-key-file').value.trim(),
+      key_content: $q('#oci-key-content').value,
+    };
+    try {
+      var d = await api('/config', { method: 'POST', body: JSON.stringify(body) });
+      ociToast(d.message || '已保存');
+      $q('#oci-key-content').value = '';
+      await loadSettings();
+      loadInstances(true);
+    } catch (e) {
+      ociToast(e.message, true);
+    }
+  });
+
+  async function testConnection() {
+    try {
+      var d = await api('/test', { method: 'POST' });
+      ociToast(d.message);
+    } catch (e) {
+      ociToast(e.message, true);
+    }
+  }
+  $q('#oci-btn-test2').addEventListener('click', testConnection);
+
+  $q('#oci-btn-compartments').addEventListener('click', async function () {
+    try {
+      var d = await api('/compartments');
+      var sel = $q('#oci-compartment');
+      sel.innerHTML = d.compartments.map(function (c) {
+        return '<option value="' + escO(c.id) + '">' + escO(c.name) + '</option>';
+      }).join('');
+      ociToast('已加载 ' + d.compartments.length + ' 个分区');
+    } catch (e) {
+      ociToast(e.message, true);
+    }
+  });
+
+  /* ---------- 标签切换 / 自动刷新 ---------- */
+  $qa('.oci-tabs .ps-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $qa('.oci-tabs .ps-btn').forEach(function (x) { x.classList.toggle('active', x === b); });
+      var t = b.dataset.ocitab;
+      $q('#oci-view-instances').classList.toggle('hidden', t !== 'instances');
+      $q('#oci-view-settings').classList.toggle('hidden', t !== 'settings');
+      if (t === 'instances') loadInstances(true);
+    });
+  });
+
+  function startTimer() {
+    stopTimer();
+    refreshTimer = setInterval(function () {
+      if (!$q('#oci-view-instances').classList.contains('hidden')) loadInstances(true);
+    }, 5000);
+  }
+  function stopTimer() { if (refreshTimer) clearInterval(refreshTimer); refreshTimer = null; }
+  $q('#oci-auto-refresh').addEventListener('change', function (e) {
+    if (e.target.checked) startTimer(); else stopTimer();
+  });
+
+  function init() {
+    if (inited) return;
+    inited = true;
+    loadSettings();
+    loadInstances();
+    startTimer();
+  }
+
+  return {
+    onShow: function () {
+      if (!inited) init();
+      else loadInstances(true);
+    }
+  };
+})();
+</script>
+</body>
+</html>

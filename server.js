@@ -1,0 +1,810 @@
+#!/usr/bin/env node
+/**
+ * AWS Lightsail 控制面板 —— 本地代理服务器（安全加固版）
+ *
+ * 核心功能零依赖（仅 Node.js 内置模块）；「在线 SSH」功能需要项目内
+ * node_modules（ssh2 + ws），已随项目一起安装，无需手动 npm install。
+ *
+ * 作用：
+ *   1. 托管前端页面 index.html（访问 http://localhost:8080）
+ *   2. 提供 POST /api/proxy 接口，服务端完成 SigV4 签名后转发到 AWS Lightsail API
+ *   3. 提供 GET/POST /api/config 接口，保存 / 查询本机 AWS 凭证
+ *   4. 提供 /ws WebSocket 端点，为「在线 SSH」建立到实例 22 端口的终端通道
+ *
+ * 安全设计（加固点）：
+ *   - AWS 凭证（AK/SK）只保存在本机文件 aws-credentials.json 中，
+ *     浏览器端不再持有、也不再做签名；签名由本服务端完成。
+ *   - /api/proxy 与 /api/config 仅接受本机回环来源（127.0.0.1 / ::1），
+ *     即使误开端口转发，外部请求也会被拒绝。
+ *   - 代理只允许转发到 lightsail.*.amazonaws.com 的端点，防止被滥用。
+ *
+ * 启动：node server.js   （默认端口 8080，可用 PORT 环境变量修改，如 PORT=9000 node server.js）
+ */
+
+'use strict';
+
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const os = require('os');
+const { spawn } = require('child_process');
+
+// 在线 SSH 依赖（可选加载；未安装时 /ws 功能不可用，其余功能不受影响）
+let WebSocketServer = null;
+let SSHClient = null;
+try {
+  WebSocketServer = require('ws');
+  SSHClient = require('ssh2').Client;
+} catch (e) {
+  /* 依赖缺失时在线 SSH 降级不可用 */
+}
+
+const PORT = Number(process.env.PORT) || 8080;
+const ROOT = __dirname;
+// 旧全局凭证路径（迁移来源：注册第一个账号时自动继承，避免重新配置）
+const LEGACY_CREDS_FILE = process.env.CREDS_FILE || path.join(ROOT, 'aws-credentials.json');
+const LEGACY_OCI_FILE = process.env.OCI_CREDS_FILE || path.join(ROOT, 'oci-credentials.json');
+// 数据目录：账号库 / 会话 / 按账号隔离的凭证都存这里（容器部署时挂 /data）
+const DATA_DIR = process.env.DATA_DIR || (process.env.CREDS_FILE ? path.dirname(process.env.CREDS_FILE) : ROOT);
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const ociBackend = require('./oci');
+
+/* ---------------- 账号系统（注册 / 登录 / 会话） ---------------- */
+const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 会话 30 天
+
+function readJsonFile(p, def) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return def; }
+}
+function writeJsonFile(p, obj) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+function loadUsers() { return readJsonFile(USERS_FILE, {}); }
+function saveUsers(u) { writeJsonFile(USERS_FILE, u); }
+function loadSessions() { return readJsonFile(SESSIONS_FILE, {}); }
+function saveSessions(s) { writeJsonFile(SESSIONS_FILE, s); }
+
+function hashPassword(password, salt) {
+  return crypto.scryptSync(String(password), salt, 64).toString('hex');
+}
+function verifyPassword(password, salt, expectedHash) {
+  const h = Buffer.from(hashPassword(password, salt), 'hex');
+  const e = Buffer.from(expectedHash, 'hex');
+  return h.length === e.length && crypto.timingSafeEqual(h, e);
+}
+function isValidUsername(u) { return /^[a-zA-Z0-9_-]{3,32}$/.test(u); }
+
+function userDir(user) { return path.join(DATA_DIR, 'users', user); }
+function userAwsFile(user) { return path.join(userDir(user), 'aws-credentials.json'); }
+function userOciFile(user) { return path.join(userDir(user), 'oci-credentials.json'); }
+
+/** 注册新账号时自动继承旧版全局凭证（AWS / OCI），避免重新配置一遍。
+ *  迁移成功后把旧文件重命名为 .migrated，只允许首个账号继承一次。 */
+function migrateLegacyCreds(user) {
+  try {
+    fs.mkdirSync(userDir(user), { recursive: true });
+    if (fs.existsSync(LEGACY_CREDS_FILE) && !fs.existsSync(userAwsFile(user))) {
+      fs.copyFileSync(LEGACY_CREDS_FILE, userAwsFile(user));
+      try { fs.renameSync(LEGACY_CREDS_FILE, LEGACY_CREDS_FILE + '.migrated'); } catch (e) { /* 重命名失败不阻塞 */ }
+    }
+    if (fs.existsSync(LEGACY_OCI_FILE) && !fs.existsSync(userOciFile(user))) {
+      fs.copyFileSync(LEGACY_OCI_FILE, userOciFile(user));
+      try { fs.renameSync(LEGACY_OCI_FILE, LEGACY_OCI_FILE + '.migrated'); } catch (e) { /* 重命名失败不阻塞 */ }
+    }
+  } catch (e) { /* 迁移失败不阻塞注册 */ }
+}
+
+function createSession(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const sessions = loadSessions();
+  const now = Date.now();
+  for (const k of Object.keys(sessions)) {
+    if (sessions[k].exp < now) delete sessions[k];
+  }
+  sessions[token] = { user, exp: now + SESSION_TTL_MS };
+  saveSessions(sessions);
+  return token;
+}
+function destroySession(token) {
+  const sessions = loadSessions();
+  if (sessions[token]) { delete sessions[token]; saveSessions(sessions); }
+}
+function getUserFromReq(req) {
+  const m = /(?:^|;\s*)session=([^;]+)/.exec(req.headers.cookie || '');
+  if (!m) return null;
+  const token = m[1];
+  const sessions = loadSessions();
+  const s = sessions[token];
+  if (!s) return null;
+  if (s.exp < Date.now()) { delete sessions[token]; saveSessions(sessions); return null; }
+  return s.user;
+}
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', 'session=' + token + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESSION_TTL_MS / 1000));
+}
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+}
+
+/** 除 /api/auth/* 外，所有 /api/* 与 /ws 都需要登录 */
+function isPublicApi(urlPath) {
+  return urlPath === '/api/auth/register' || urlPath === '/api/auth/login' || urlPath === '/api/auth/me';
+}
+
+/* ---------------- 账号凭证存储（按账号隔离） ---------------- */
+function loadCredentials(user) {
+  try {
+    const raw = fs.readFileSync(userAwsFile(user), 'utf8');
+    const c = JSON.parse(raw);
+    if (c && c.accessKeyId && c.secretAccessKey && c.region) return c;
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+function saveCredentials(user, c) {
+  fs.mkdirSync(path.dirname(userAwsFile(user)), { recursive: true });
+  fs.writeFileSync(userAwsFile(user), JSON.stringify(c, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+function clearCredentials(user) {
+  try { fs.rmSync(userAwsFile(user), { force: true }); } catch (e) { /* noop */ }
+}
+
+/* ---------------- 服务端 SigV4 签名（AWS JSON 1.1 协议） ---------------- */
+function hmacSha256(key, data) {
+  return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
+}
+function sha256Hex(data) {
+  return crypto.createHash('sha256').update(data, 'utf8').digest('hex');
+}
+function signAwsJson(action, params, creds, region) {
+  const service = 'lightsail';
+  const host = 'lightsail.' + region + '.amazonaws.com';
+  const body = JSON.stringify(params || {});
+  const payloadHash = sha256Hex(body);
+  const amzDate = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const target = 'Lightsail_20161128.' + action;
+
+  const headers = {
+    'content-type': 'application/x-amz-json-1.1',
+    'host': host,
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': amzDate,
+    'x-amz-target': target
+  };
+  const signedHeaderNames = Object.keys(headers).sort();
+  const canonicalHeaders = signedHeaderNames.map(k => k + ':' + headers[k]).join('\n');
+  const signedHeaders = signedHeaderNames.join(';');
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, '', signedHeaders, payloadHash].join('\n');
+  const scope = dateStamp + '/' + region + '/' + service + '/aws4_request';
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256Hex(canonicalRequest)].join('\n');
+
+  const kDate = hmacSha256('AWS4' + creds.secretAccessKey, dateStamp);
+  const kRegion = hmacSha256(kDate, region);
+  const kService = hmacSha256(kRegion, service);
+  const kSigning = hmacSha256(kService, 'aws4_request');
+  const signature = hmacSha256(kSigning, stringToSign).toString('hex');
+  const authorization = 'AWS4-HMAC-SHA256 Credential=' + creds.accessKeyId + '/' + scope +
+    ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
+
+  return {
+    host,
+    headers: {
+      'Content-Type': 'application/x-amz-json-1.1',
+      'X-Amz-Date': amzDate,
+      'X-Amz-Target': target,
+      'X-Amz-Content-Sha256': payloadHash,
+      'Authorization': authorization
+    },
+    body
+  };
+}
+
+/* 仅允许本机回环来源（防止端口转发后外部滥用代理与配置接口） */
+function isLoopback(addr) {
+  if (!addr) return false;
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/* 容器/路由器部署时可用 ALLOW_LAN=1 放开局域网访问（默认保持仅本机） */
+function isAllowedHost(addr) {
+  if (process.env.ALLOW_LAN === '1') return true;
+  return isLoopback(addr);
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8'
+};
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(obj));
+}
+
+/* 兼容带 BOM 的请求体（某些工具会写 UTF-8 BOM） */
+function parseJsonBody(raw) {
+  try { return JSON.parse(raw); } catch (e) {
+    try { return JSON.parse(String(raw).replace(/^\uFEFF/, '')); } catch (e2) { return null; }
+  }
+}
+
+const server = http.createServer((req, res) => {
+  // 同源访问（页面与 API 都由本服务提供）；不使用 CORS 通配，配合 HttpOnly Cookie 鉴权
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const urlPath0 = req.url.split('?')[0];
+
+  // ---- 账号：注册 ----
+  if (req.method === 'POST' && urlPath0 === '/api/auth/register') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      const username = String(payload.username || '').trim();
+      const password = String(payload.password || '');
+      if (!isValidUsername(username)) return sendJson(res, 400, { error: '账号需为 3-32 位字母、数字、下划线或中划线' });
+      if (password.length < 6) return sendJson(res, 400, { error: '密码至少 6 位' });
+      const users = loadUsers();
+      if (users[username]) return sendJson(res, 409, { error: '该账号已存在，请直接登录' });
+      const salt = crypto.randomBytes(16).toString('hex');
+      users[username] = { salt, hash: hashPassword(password, salt), created: Date.now() };
+      saveUsers(users);
+      migrateLegacyCreds(username); // 继承旧版全局凭证（AWS / OCI）
+      const token = createSession(username);
+      setSessionCookie(res, token);
+      return sendJson(res, 200, { ok: true, user: username });
+    });
+    return;
+  }
+
+  // ---- 账号：登录 ----
+  if (req.method === 'POST' && urlPath0 === '/api/auth/login') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      const username = String(payload.username || '').trim();
+      const password = String(payload.password || '');
+      const users = loadUsers();
+      const u = users[username];
+      if (!u || !verifyPassword(password, u.salt, u.hash)) {
+        return sendJson(res, 401, { error: '账号或密码不正确' });
+      }
+      const token = createSession(username);
+      setSessionCookie(res, token);
+      return sendJson(res, 200, { ok: true, user: username });
+    });
+    return;
+  }
+
+  // ---- 账号：退出 ----
+  if (req.method === 'POST' && urlPath0 === '/api/auth/logout') {
+    const m = /(?:^|;\s*)session=([^;]+)/.exec(req.headers.cookie || '');
+    if (m) destroySession(m[1]);
+    clearSessionCookie(res);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // ---- 账号：当前登录用户 ----
+  if (req.method === 'GET' && urlPath0 === '/api/auth/me') {
+    const user = getUserFromReq(req);
+    if (!user) return sendJson(res, 401, { error: '未登录' });
+    return sendJson(res, 200, { user });
+  }
+
+  // ---- 其余 /api/* 均需登录 ----
+  const isApi = urlPath0.startsWith('/api/');
+  if (isApi) {
+    if (!isAllowedHost(req.socket.remoteAddress)) return sendJson(res, 403, { error: '仅允许本机访问' });
+    const user = getUserFromReq(req);
+    if (!user) return sendJson(res, 401, { error: '未登录，请先登录账号' });
+    req.user = user;
+  }
+
+  // ---- 查询账号凭证状态（不回显密钥，只返回是否已配置 + AK 尾号）----
+  if (req.method === 'GET' && urlPath0 === '/api/config') {
+    const c = loadCredentials(req.user);
+    if (c) {
+      return sendJson(res, 200, { configured: true, accessKeyIdTail: String(c.accessKeyId).slice(-4), region: c.region });
+    }
+    return sendJson(res, 200, { configured: false, accessKeyIdTail: '', region: '' });
+  }
+
+  // ---- 保存 / 清除账号凭证 ----
+  if (req.method === 'POST' && urlPath0 === '/api/config') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      if (payload.clear) {
+        clearCredentials(req.user);
+        return sendJson(res, 200, { ok: true });
+      }
+      const ak = String(payload.accessKeyId || '').trim();
+      const sk = String(payload.secretAccessKey || '').trim();
+      const region = String(payload.region || '').trim();
+      if (!ak || !sk || !region) return sendJson(res, 400, { error: 'Access Key / Secret Key / 区域不能为空' });
+      if (!/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
+      if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
+      saveCredentials(req.user, { accessKeyId: ak, secretAccessKey: sk, region });
+      return sendJson(res, 200, { ok: true, accessKeyIdTail: ak.slice(-4), region });
+    });
+    return;
+  }
+
+  // ---- 转发代理（服务端签名，使用当前账号的凭证）----
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/proxy') {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 4 * 1024 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) {
+        return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      }
+      if (!payload.action) {
+        return sendJson(res, 400, { error: '前端版本过旧，请按 Ctrl+F5 强制刷新浏览器后重试' });
+      }
+      const creds = loadCredentials(req.user);
+      if (!creds) {
+        return sendJson(res, 409, { error: '尚未配置 AWS 凭证：请先在「设置」页填写并保存' });
+      }
+      const region = payload.region || creds.region;
+      if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) {
+        return sendJson(res, 400, { error: '区域格式不正确' });
+      }
+      let signed;
+      try {
+        signed = signAwsJson(payload.action, payload.params || {}, creds, region);
+      } catch (e) {
+        return sendJson(res, 500, { error: '签名失败：' + e.message });
+      }
+
+      const upstream = https.request({
+        hostname: signed.host,
+        port: 443,
+        path: '/',
+        method: 'POST',
+        headers: signed.headers
+      }, (upRes) => {
+        let data = '';
+        upRes.on('data', (chunk) => { data += chunk; });
+        upRes.on('end', () => {
+          sendJson(res, 200, {
+            status: upRes.statusCode || 500,
+            headers: upRes.headers,
+            body: data
+          });
+        });
+      });
+
+      upstream.setTimeout(30000, () => {
+        upstream.destroy();
+        sendJson(res, 504, { error: 'AWS 请求超时（30 秒）' });
+      });
+      upstream.on('error', (e) => {
+        sendJson(res, 502, { error: '无法连接 AWS：' + e.message });
+      });
+      upstream.write(signed.body);
+      upstream.end();
+    });
+    return;
+  }
+
+  // ---- 静态文件 ----
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent(req.url.split('?')[0]);
+  } catch (e) {
+    urlPath = '/';
+  }
+
+  // ---- OCI 面板 API（甲骨文，纯 Node 实现；使用当前账号的凭证文件）----
+  if (urlPath.startsWith('/api/oci')) {
+    ociBackend.setCredsFile(userOciFile(req.user));
+    return ociBackend.handle(req, res, urlPath, req.method, sendJson, isAllowedHost);
+  }
+
+  let filePath = urlPath === '/' ? path.join(ROOT, 'index.html') : path.join(ROOT, urlPath);
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+  fs.stat(filePath, (err, stat) => {
+    if (!err && stat.isDirectory()) filePath = path.join(filePath, 'index.html');
+    fs.readFile(filePath, (readErr, buf) => {
+      if (readErr) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('404 Not Found');
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+      // 页面不缓存，避免浏览器加载到旧版前端（凭证处理逻辑变更时尤为重要）
+      if (ext === '.html') headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      res.writeHead(200, headers);
+      res.end(buf);
+    });
+  });
+});
+
+server.listen(PORT, () => {
+  console.log('');
+  console.log('  云服务器控制台（AWS 光帆 + 甲骨文 OCI）已启动');
+  console.log('  请在浏览器打开: http://localhost:' + PORT);
+  const userCount = Object.keys(loadUsers()).length;
+  console.log('  账号系统：' + (userCount ? '已注册 ' + userCount + ' 个账号，打开页面用账号登录' : '首次打开页面请先「注册账号」（注册后自动继承旧版凭证）'));
+  console.log('  凭证目录：' + DATA_DIR);
+  console.log('  接口限制：/api 需登录；仅允许本机/局域网访问（防端口转发滥用）');
+  if (WebSocketServer && SSHClient) {
+    console.log('  在线 SSH：已启用');
+  } else {
+    console.log('  在线 SSH：未启用（缺少 ssh2/ws 依赖，请保留 node_modules 目录）');
+  }
+  console.log('  （Ctrl+C 停止）');
+  console.log('');
+});
+
+/* ============================================================
+   在线 SSH —— WebSocket 终端通道（仅本机访问）
+   ============================================================ */
+// 兜底：任何未捕获异常只记录、不退出，避免面板服务整体挂掉
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : String(err));
+});
+
+/**
+ * 清洗私钥字符串，修复常见传输损坏：
+ *  - 首尾空白 / BOM
+ *  - 字面 "\n"（双重转义）还原为真实换行
+ *  - CRLF 统一为 LF（ssh2 两种都支持，统一更稳）
+ */
+function sanitizePrivateKey(key) {
+  if (!key) return key;
+  let k = String(key);
+  if (k.includes('\\n')) k = k.replace(/\\n/g, '\n');
+  k = k.replace(/^\uFEFF/, '');
+  k = k.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return k.trim();
+}
+
+/**
+ * 私钥类型映射：无论头部怎么粘连/缺空格，都归一为标准 PEM 类型名
+ */
+const PRIVATE_KEY_TYPES = {
+  'OPENSSHPRIVATEKEY': 'OPENSSH PRIVATE KEY',
+  'RSAPRIVATEKEY': 'RSA PRIVATE KEY',
+  'PRIVATEKEY': 'PRIVATE KEY',
+  'ECPRIVATEKEY': 'EC PRIVATE KEY',
+  'DSAPRIVATEKEY': 'DSA PRIVATE KEY',
+  'ENCRYPTEDPRIVATEKEY': 'ENCRYPTED PRIVATE KEY'
+};
+
+/**
+ * 重建私钥为标准 PEM 格式：提取 BEGIN/END 之间的 base64，
+ * 去掉所有空白（含被破坏的换行），再按 64 字符一行重新排版。
+ * 用于修复私钥在 JSON 传输中换行丢失/被空格替换导致的解析失败。
+ * 无法识别时返回 null（交给 ssh2 原样尝试）。
+ */
+function rebuildPrivateKey(key) {
+  const s = String(key).trim();
+  const m = s.match(/-----BEGIN\s*([A-Za-z0-9 ]+?)-----/);
+  if (!m) return null;
+  const type = PRIVATE_KEY_TYPES[m[1].replace(/\s+/g, '').toUpperCase()];
+  if (!type) return null;
+  const b64m = s.match(/-----BEGIN[^-]+-----([\s\S]*?)-----END/);
+  if (!b64m) return null;
+  const b64 = b64m[1].replace(/\s+/g, '');
+  if (!b64) return null;
+  const lines = b64.match(/.{1,64}/g) || [];
+  return `-----BEGIN ${type}-----\n` + lines.join('\n') + '\n-----END ' + type + '-----';
+}
+
+function normalizePrivateKey(key) {
+  const cleaned = sanitizePrivateKey(key);
+  if (!cleaned) return cleaned;
+  const rebuilt = rebuildPrivateKey(cleaned);
+  const candidate = rebuilt || cleaned;
+  // AWS Lightsail 的 ED25519 新实例私钥是 PKCS#8（-----BEGIN PRIVATE KEY-----），
+  // ssh2 1.17 无法直接解析该格式，需要转成 ssh2 认识的老格式。
+  if (/^-----BEGIN PRIVATE KEY-----/.test(candidate)) {
+    const converted = convertPkcs8ToSsh2Friendly(candidate);
+    if (converted) return converted;
+  }
+  return candidate;
+}
+
+function be32(n) { const b = Buffer.alloc(4); b.writeUInt32BE(n >>> 0); return b; }
+function sshString(buf) { return Buffer.concat([be32(buf.length), buf]); }
+
+/**
+ * 将 PKCS#8 格式私钥（-----BEGIN PRIVATE KEY-----）转换为 ssh2 1.17 能解析的格式：
+ *  - Ed25519 -> OpenSSH（openssh-key-v1，手工构造，ssh2 不支持 PKCS#8 的 Ed25519）
+ *  - RSA     -> PKCS#1（-----BEGIN RSA PRIVATE KEY-----）
+ *  - EC      -> SEC1 （-----BEGIN EC PRIVATE KEY-----）
+ * 解析失败或未知类型返回 null（交给 ssh2 原样尝试）。
+ */
+function convertPkcs8ToSsh2Friendly(pem) {
+  try {
+    const pk = crypto.createPrivateKey({ key: pem, format: 'pem' });
+    const jwk = pk.export({ format: 'jwk' });
+    if (jwk.kty === 'OKP' && jwk.crv === 'Ed25519') {
+      const pubBytes = Buffer.from(jwk.x, 'base64url');
+      const seed = Buffer.from(jwk.d, 'base64url');
+      if (pubBytes.length !== 32 || seed.length !== 32) return null;
+      const type = Buffer.from('ssh-ed25519');
+      const pubBlob = Buffer.concat([sshString(type), sshString(pubBytes)]);
+      const checkint = crypto.randomBytes(4);
+      const privBlobOuter = Buffer.concat([
+        checkint,
+        checkint,
+        sshString(type),
+        sshString(pubBytes),
+        sshString(Buffer.concat([seed, pubBytes])),
+        sshString(Buffer.alloc(0)),
+        Buffer.from([1])
+      ]);
+      const opensshBlob = Buffer.concat([
+        Buffer.from('openssh-key-v1\0'),
+        sshString(Buffer.from('none')),
+        sshString(Buffer.from('none')),
+        sshString(Buffer.alloc(0)),
+        be32(1),
+        sshString(pubBlob),
+        sshString(privBlobOuter)
+      ]);
+      const b64 = opensshBlob.toString('base64').match(/.{1,64}/g).join('\n');
+      return `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----`;
+    }
+    if (jwk.kty === 'RSA') {
+      const rsaPem = crypto.createPrivateKey({ key: pem, format: 'pem' }).export({ type: 'pkcs1', format: 'pem' });
+      return String(rsaPem).trim();
+    }
+    if (jwk.kty === 'EC') {
+      const ecPem = crypto.createPrivateKey({ key: pem, format: 'pem' }).export({ type: 'sec1', format: 'pem' });
+      return String(ecPem).trim();
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ============================================================
+   在线 SSH：系统 OpenSSH 客户端通道（支持 AWS 证书认证 certKey）
+   Lightsail 的浏览器 SSH 使用 SSH 证书机制：GetInstanceAccessDetails
+   返回的 privateKey 必须配合 certKey（AWS CA 短期签发的证书）一起使用，
+   ssh2 库不支持证书认证，因此改用系统自带的 OpenSSH 客户端（Win10 内置）。
+   ============================================================ */
+function findSshExe() {
+  const candidates = [
+    process.env.SSH_PATH,
+    'C:\\Windows\\System32\\OpenSSH\\ssh.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\ssh.exe',
+    '/usr/bin/ssh',
+    '/usr/local/bin/ssh'
+  ].filter(Boolean);
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch (e) { /* noop */ }
+  }
+  return 'ssh';
+}
+
+function startSshViaExe({ host, port, username, privateKey, certKey, cols, rows }, send) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-ssh-'));
+  const keyFile = path.join(tmpDir, 'id');
+  const certFile = path.join(tmpDir, 'id-cert.pub');
+  const knownHosts = path.join(tmpDir, 'known_hosts');
+  fs.writeFileSync(keyFile, privateKey + '\n');
+  fs.writeFileSync(certFile, certKey + '\n');
+  fs.writeFileSync(knownHosts, '');
+
+  const sshPath = findSshExe();
+  const args = [
+    '-tt',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=' + knownHosts,
+    '-o', 'LogLevel=ERROR',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'ServerAliveInterval=15',
+    '-o', 'ServerAliveCountMax=3',
+    '-i', keyFile,
+    '-o', 'CertificateFile=' + certFile,
+    '-p', String(port || 22),
+    '-l', username,
+    host
+  ];
+  let proc = null;
+  try {
+    proc = spawn(sshPath, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (e) {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e2) { /* noop */ }
+    send({ type: 'error', message: '无法启动系统 SSH 客户端：' + e.message });
+    return null;
+  }
+
+  let stderrBuf = '';
+  let readySent = false;
+  let exited = false;
+  const cleanupTmp = () => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* noop */ } };
+  const markReady = () => {
+    if (!readySent) { readySent = true; send({ type: 'connected' }); send({ type: 'shell-ready' }); }
+  };
+  proc.stdout.on('data', (d) => { markReady(); send({ type: 'data', data: d.toString('utf8') }); });
+  proc.stderr.on('data', (d) => { stderrBuf += d.toString('utf8'); });
+  const timer = setTimeout(() => markReady(), 2000);
+  proc.on('error', (err) => {
+    clearTimeout(timer); cleanupTmp(); exited = true;
+    send({ type: 'error', message: '无法启动系统 SSH 客户端：' + err.message });
+  });
+  proc.on('close', (code) => {
+    clearTimeout(timer); cleanupTmp();
+    if (exited) return;
+    exited = true;
+    const stderr = stderrBuf.trim();
+    if (code !== 0 || !readySent) {
+      let msg = 'SSH 连接失败（exit ' + code + '）';
+      if (/Permission denied/i.test(stderr)) msg = 'SSH 认证失败：用户名或证书不被服务器接受（Permission denied）';
+      else if (/Could not resolve hostname/i.test(stderr)) msg = '无法解析主机名（Could not resolve hostname）';
+      else if (/timed out|Operation timed out/i.test(stderr)) msg = '连接超时，请检查实例公网 IP 是否可达、22 端口是否在防火墙放行';
+      else if (/Connection refused/i.test(stderr)) msg = '连接被拒绝（Connection refused），请确认实例已开机且 22 端口已开放';
+      else if (stderr) msg += '：' + stderr.split('\n')[0];
+      send({ type: 'error', message: msg });
+    } else {
+      send({ type: 'exit' });
+    }
+  });
+
+  return {
+    write(d) { try { proc.stdin.write(d); } catch (e) { /* noop */ } },
+    resize(c, r) {
+      try { proc.stdin.write('stty rows ' + r + ' cols ' + c + '\n'); } catch (e) { /* noop */ }
+    },
+    close() {
+      try { proc.stdin.end(); } catch (e) { /* noop */ }
+      try { proc.kill(); } catch (e) { /* noop */ }
+    }
+  };
+}
+
+if (WebSocketServer && SSHClient) {
+  const wss = new WebSocketServer.Server({ noServer: true });
+
+  // 在线 SSH 通道同样要求登录：upgrade 时校验会话 Cookie，未登录直接拒绝
+  server.on('upgrade', (req, socket, head) => {
+    const p = (req.url || '').split('?')[0];
+    if (p !== '/ws') { socket.destroy(); return; }
+    if (!isAllowedHost(req.socket ? req.socket.remoteAddress : req.connection.remoteAddress)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (!getUserFromReq(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
+
+  wss.on('connection', (socket) => {
+    let conn = null;
+    let stream = null;
+    let sshProc = null;
+    let closed = false;
+
+    const cleanup = () => {
+      if (sshProc) { try { sshProc.close(); } catch (e) { /* noop */ } sshProc = null; }
+      if (stream) { try { stream.end(); } catch (e) { /* noop */ } stream = null; }
+      if (conn) { try { conn.end(); } catch (e) { /* noop */ } conn = null; }
+    };
+    const send = (obj) => {
+      if (socket.readyState === WebSocketServer.OPEN) {
+        socket.send(JSON.stringify(obj));
+      }
+    };
+
+    socket.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch (e) { return; }
+
+      if (msg.type === 'connect') {
+        if (conn || sshProc) return;
+        const { host, port, username, privateKey: rawKey, certKey: rawCert, term, cols, rows } = msg;
+        const privateKey = normalizePrivateKey(rawKey);
+        if (!host || !username || !privateKey) {
+          return send({ type: 'error', message: '缺少连接参数（host/username/privateKey）' });
+        }
+        // AWS Lightsail 返回 certKey 时走系统 OpenSSH 客户端（支持 SSH 证书认证，
+        // 与光帆控制台同机制）；没有 certKey 才退回 ssh2 普通密钥认证。
+        if (rawCert) {
+          sshProc = startSshViaExe({
+            host,
+            port: port || 22,
+            username,
+            privateKey,
+            certKey: String(rawCert).trim(),
+            cols: cols || 80,
+            rows: rows || 24
+          }, send);
+          if (sshProc) return;
+        }
+        conn = new SSHClient();
+        conn.on('ready', () => {
+          send({ type: 'connected' });
+          conn.shell({ term: term || 'xterm-256color', cols: cols || 80, rows: rows || 24 }, (err, str) => {
+            if (err) return send({ type: 'error', message: '启动 shell 失败：' + err.message });
+            stream = str;
+            stream.on('data', (d) => {
+              if (socket.readyState === WebSocketServer.OPEN) {
+                socket.send(JSON.stringify({ type: 'data', data: d.toString('utf8') }));
+              }
+            });
+            stream.on('close', () => {
+              if (!closed) { closed = true; send({ type: 'exit' }); }
+              cleanup();
+            });
+            stream.on('error', () => { /* 由 close 处理 */ });
+            send({ type: 'shell-ready' });
+          });
+        });
+        conn.on('error', (err) => {
+          if (!closed) { closed = true; send({ type: 'error', message: 'SSH 连接失败：' + err.message }); }
+          cleanup();
+        });
+        conn.on('close', () => {
+          if (!closed) { closed = true; send({ type: 'exit' }); }
+          cleanup();
+        });
+        try {
+          conn.connect({
+            host,
+            port: port || 22,
+            username,
+            privateKey,
+            readyTimeout: 20000,
+            keepaliveInterval: 15000
+          });
+        } catch (err) {
+          if (!closed) { closed = true; send({ type: 'error', message: 'SSH 参数无效：' + err.message }); }
+          cleanup();
+        }
+      } else if (msg.type === 'data') {
+        if (sshProc) sshProc.write(msg.data);
+        else if (stream) stream.write(msg.data);
+      } else if (msg.type === 'resize') {
+        if (sshProc) sshProc.resize(msg.cols, msg.rows);
+        else if (stream && msg.rows && msg.cols) {
+          try { stream.setWindow(msg.rows, msg.cols); } catch (e) { /* noop */ }
+        }
+      } else if (msg.type === 'disconnect') {
+        cleanup();
+        try { socket.close(); } catch (e) { /* noop */ }
+      }
+    });
+
+    socket.on('close', () => cleanup());
+    socket.on('error', () => cleanup());
+  });
+}

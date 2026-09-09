@@ -1,0 +1,19 @@
+# ===== 运行数据与凭证（绝不提交） =====
+credentials*.json
+oci_config.json
+users/
+data/
+*.pem
+*.key
+私钥*/
+private*/
+
+# ===== 依赖与运行时（npm install 自动安装） =====
+node_modules/
+node.exe
+vendor/
+*.log
+
+# ===== 备份 / 临时 =====
+_backup/
+.batlog*
