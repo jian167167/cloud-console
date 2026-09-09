@@ -460,6 +460,16 @@ select.input { cursor: pointer; }
       </a>
     </nav>
     <div class="nav" style="margin-top:6px">
+      <a class="nav-item" data-nav="instances" href="#/instances" title="AWS 光帆实例控制台">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-.42-8.98 6 6 0 1 0-11.33 2.87A3.5 3.5 0 0 0 6 19h11.5z"/></svg>
+        AWS 光帆
+      </a>
+      <a class="nav-item" data-nav="oci" href="#/oci" title="甲骨文 OCI 实例控制台">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="6" rx="1.5"/><rect x="4" y="13" width="16" height="6" rx="1.5"/></svg>
+        甲骨文 OCI
+      </a>
+    </div>
+    <div class="nav" style="margin-top:2px">
       <a class="nav-item" id="nav-telegram" href="javascript:void(0)" title="Telegram 操作通知（实例操作 / 面板登录提醒）">
         <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M21.94 4.16a1.5 1.5 0 0 0-2.05-1.28L2.9 9.62c-1.23.49-1.16 2.2.1 2.58l4.3 1.29 1.6 5.13c.36 1.16 1.82 1.37 2.5.36l2.03-3.02 4.02 2.95c.97.71 2.36.25 2.6-.9l2.9-13.06c.09-.42.01-.66 0-.79zM9.2 13.1l8.1-5.08c.36-.23.76.22.47.53l-6.2 6.68-.6 2.6-1.77-4.73z"/></svg>
         电报机器人
@@ -482,10 +492,6 @@ select.input { cursor: pointer; }
           <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <span id="theme-label">浅色</span>
         </button>
-        <div class="panel-switch" id="panel-switch">
-          <button class="ps-btn active" data-panel="aws" title="AWS 光帆实例控制台">AWS 光帆</button>
-          <button class="ps-btn" data-panel="oci" title="甲骨文 OCI 实例控制台">甲骨文 OCI</button>
-        </div>
         <span class="region-chip" id="region-chip">区域：--</span>
         <button class="btn btn-ghost btn-sm" id="btn-refresh" title="重新加载当前页面数据">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
@@ -587,6 +593,17 @@ select.input { cursor: pointer; }
               <button id="oci-btn-test2" class="btn">测试连接</button>
               <button id="oci-btn-clear" class="btn btn-danger">清除凭证</button>
             </div>
+          </div>
+
+          <div class="form-card" style="margin-top:14px">
+            <h3>数据备份 / 恢复</h3>
+            <div class="oci-tip" style="margin-bottom:10px">备份包含<b>全部</b>内容：登录账号、AWS 光帆凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同账号密码，请妥善保管。</b>重装容器后导入即可全部恢复。</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-accent" id="oci-backup-export" type="button">⬇ 导出备份</button>
+              <button class="btn" id="oci-backup-import" type="button">⬆ 导入恢复</button>
+              <input type="file" id="oci-backup-file" accept=".json,application/json" style="display:none">
+            </div>
+            <div id="oci-backup-result" style="margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>
           </div>
         </div>
       </div>
@@ -849,12 +866,11 @@ var Auth = (function () {
    ============================================================ */
 (function () {
   function applyPanel(panel) {
-    var sw = document.getElementById('panel-switch');
     var view = document.getElementById('view');
     var oci = document.getElementById('oci-view');
-    if (!sw || !view || !oci) return;
-    sw.querySelectorAll('.ps-btn').forEach(function (x) {
-      x.classList.toggle('active', x.getAttribute('data-panel') === panel);
+    if (!view || !oci) return;
+    $$('.nav-item').forEach(function (x) {
+      if (x.dataset.nav) x.classList.toggle('active', x.dataset.nav === panel);
     });
     if (panel === 'oci') {
       view.style.display = 'none';
@@ -869,19 +885,6 @@ var Auth = (function () {
     return location.hash.replace(/^#\/?/, '').split('?')[0] === 'oci' ? 'oci' : 'aws';
   }
   document.addEventListener('DOMContentLoaded', function () {
-    var sw = document.getElementById('panel-switch');
-    if (!sw) return;
-    sw.querySelectorAll('.ps-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (b.getAttribute('data-panel') === 'oci') {
-          if (location.hash !== '#/oci') location.hash = '#/oci';
-          else applyPanel('oci');
-        } else {
-          if (panelFromHash() === 'oci') location.hash = '#/instances';
-          else applyPanel('aws');
-        }
-      });
-    });
     window.addEventListener('hashchange', function () { applyPanel(panelFromHash()); });
     applyPanel(panelFromHash());
   });
@@ -892,6 +895,62 @@ var Auth = (function () {
    ============================================================ */
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+/* ---------- 数据备份：导出 / 恢复（全量：AWS 光帆 + 甲骨文 OCI + 电报 + 账号）---------- */
+function bindBackupCard(exportBtn, importBtn, fileInput, resultBox) {
+  if (!exportBtn || !importBtn || !fileInput || !resultBox) return;
+  exportBtn.addEventListener('click', async () => {
+    resultBox.textContent = '正在打包备份…';
+    try {
+      const r = await fetch(getConfigUrl().replace('/config', '/backup'));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const ts = new Date(), pad = n => String(n).padStart(2, '0');
+      const name = 'cloud-console-backup-' + ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.json';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      resultBox.textContent = '备份已导出：' + name + '（含全部账号、AWS/甲骨文凭证与电报配置，请妥善保管）';
+      resultBox.style.color = '';
+    } catch (e) {
+      resultBox.textContent = '导出失败：' + e.message;
+      resultBox.style.color = 'var(--warn)';
+    }
+  });
+  importBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!f) return;
+    if (!window.confirm('导入备份将覆盖当前所有账号、凭证与电报配置，确定继续吗？')) return;
+    resultBox.textContent = '正在恢复…';
+    try {
+      const text = await f.text();
+      const r = await fetch(getConfigUrl().replace('/config', '/backup/restore'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) {
+        resultBox.textContent = d.message;
+        resultBox.style.color = '';
+        toast('数据恢复成功', 'ok');
+        setTimeout(() => { location.hash = '#/instances'; location.reload(); }, 800);
+      } else {
+        resultBox.textContent = d.error || '恢复失败';
+        resultBox.style.color = 'var(--warn)';
+      }
+    } catch (e) {
+      resultBox.textContent = '恢复失败：' + e.message;
+      resultBox.style.color = 'var(--warn)';
+    }
+  });
+}
 
 /* ---------- 主题切换（深色 / 浅色，记忆在 localStorage）---------- */
 function applyTheme(theme) {
@@ -1994,67 +2053,8 @@ async function renderSettings() {
     </div>
   `;
 
-  // ---- 数据备份：导出 / 恢复 ----
-  const bkExport = $('#set-backup-export');
-  if (bkExport) {
-    bkExport.addEventListener('click', async () => {
-      const box = $('#set-backup-result');
-      box.textContent = '正在打包备份…';
-      try {
-        const r = await fetch(getConfigUrl().replace('/config', '/backup'));
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const data = await r.json();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const ts = new Date(), pad = n => String(n).padStart(2, '0');
-        const name = 'cloud-console-backup-' + ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.json';
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-        box.textContent = '备份已导出：' + name + '（含全部账号、凭证与电报配置，请妥善保管）';
-        box.style.color = '';
-      } catch (e) {
-        box.textContent = '导出失败：' + e.message;
-        box.style.color = 'var(--warn)';
-      }
-    });
-  }
-  const bkImport = $('#set-backup-import');
-  const bkFile = $('#set-backup-file');
-  if (bkImport && bkFile) {
-    bkImport.addEventListener('click', () => bkFile.click());
-    bkFile.addEventListener('change', async () => {
-      const f = bkFile.files && bkFile.files[0];
-      bkFile.value = '';
-      if (!f) return;
-      if (!window.confirm('导入备份将覆盖当前所有账号、凭证与电报配置，确定继续吗？')) return;
-      const box = $('#set-backup-result');
-      box.textContent = '正在恢复…';
-      try {
-        const text = await f.text();
-        const r = await fetch(getConfigUrl().replace('/config', '/backup/restore'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: text
-        });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.ok) {
-          box.textContent = d.message;
-          box.style.color = '';
-          toast('数据恢复成功', 'ok');
-          setTimeout(() => { location.hash = '#/instances'; location.reload(); }, 800);
-        } else {
-          box.textContent = d.error || '恢复失败';
-          box.style.color = 'var(--warn)';
-        }
-      } catch (e) {
-        box.textContent = '恢复失败：' + e.message;
-        box.style.color = 'var(--warn)';
-      }
-    });
-  }
+  // ---- 数据备份：导出 / 恢复（全量：AWS 光帆 + 甲骨文 OCI + 电报 + 账号）----
+  bindBackupCard($('#set-backup-export'), $('#set-backup-import'), $('#set-backup-file'), $('#set-backup-result'));
 
   const migrateBtn = $('#set-migrate');
   if (migrateBtn && legacy) {
@@ -2538,7 +2538,12 @@ function renderInstanceDetailView() {
    ============================================================ */
 async function render() {
   const { path, params } = parseHash();
-  if (path === 'oci') { $('#topbar-title').textContent = '甲骨文 OCI'; updateCredsBadge(); return; }
+  if (path === 'oci') {
+    $('#topbar-title').textContent = '甲骨文 OCI';
+    $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === 'oci'));
+    updateCredsBadge();
+    return;
+  }
   await loadAwsConfig();
   const titles = { instances: '实例', create: '创建实例', settings: '设置' };
   $('#topbar-title').textContent = titles[path] || '实例';
@@ -3086,6 +3091,7 @@ window.OciPanel = (function () {
   function init() {
     if (inited) return;
     inited = true;
+    bindBackupCard($q('#oci-backup-export'), $q('#oci-backup-import'), $q('#oci-backup-file'), $q('#oci-backup-result'));
     loadSettings();
     loadInstances();
     startTimer();
