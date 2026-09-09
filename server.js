@@ -458,6 +458,61 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ---- 数据备份：导出全部账号与凭证（含电报配置）----
+  if (req.method === 'GET' && urlPath0 === '/api/backup') {
+    const users = loadUsers();
+    const accounts = {};
+    for (const u of Object.keys(users)) {
+      const dir = userDir(u);
+      const acc = {};
+      const awsFile = path.join(dir, 'aws-credentials.json');
+      const ociFile = path.join(dir, 'oci-credentials.json');
+      const tgFile = path.join(dir, 'telegram.json');
+      if (fs.existsSync(awsFile)) { try { acc.aws = readJsonFile(awsFile, null); } catch (e) { acc.aws = null; } }
+      if (fs.existsSync(ociFile)) { try { acc.oci = readJsonFile(ociFile, null); } catch (e) { acc.oci = null; } }
+      if (fs.existsSync(tgFile)) { try { acc.telegram = readJsonFile(tgFile, null); } catch (e) { acc.telegram = null; } }
+      accounts[u] = acc;
+    }
+    opLog(req.user, '导出数据备份');
+    return sendJson(res, 200, {
+      app: 'cloud-console',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      users,
+      accounts
+    });
+  }
+
+  // ---- 数据恢复：导入备份并覆盖当前配置 ----
+  if (req.method === 'POST' && urlPath0 === '/api/backup/restore') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      let body = null;
+      try { body = JSON.parse(raw); } catch (e) { body = null; }
+      if (!body || body.app !== 'cloud-console' || !body.users || typeof body.users !== 'object') {
+        return sendJson(res, 400, { error: '不是有效的云服务器控制台备份文件（缺少 app / users 字段）' });
+      }
+      try {
+        saveUsers(body.users);
+        const accounts = body.accounts || {};
+        for (const u of Object.keys(accounts)) {
+          const acc = accounts[u] || {};
+          const dir = userDir(u);
+          fs.mkdirSync(dir, { recursive: true });
+          if (acc.aws != null) writeJsonFile(path.join(dir, 'aws-credentials.json'), acc.aws);
+          if (acc.oci != null) writeJsonFile(path.join(dir, 'oci-credentials.json'), acc.oci);
+          if (acc.telegram != null) writeJsonFile(path.join(dir, 'telegram.json'), acc.telegram);
+        }
+        opLog(req.user, '恢复数据备份：' + Object.keys(body.users).length + ' 个账号');
+        return sendJson(res, 200, { ok: true, message: '恢复成功：' + Object.keys(body.users).length + ' 个账号、' + Object.keys(accounts).length + ' 组配置' });
+      } catch (e) {
+        return sendJson(res, 500, { error: '恢复失败：' + e.message });
+      }
+    });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath0 === '/api/logs') {
     return sendJson(res, 200, { logs: opLogs.slice(-OP_LOG_MAX) });
   }

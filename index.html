@@ -36,6 +36,35 @@
   --radius-sm: 6px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
+
+/* ===== 浅色主题（点击顶部主题按钮切换，选择记忆在 localStorage）===== */
+body[data-theme="light"] {
+  --bg: #F2F6FA;
+  --surface: #FFFFFF;
+  --surface-2: #EDF2F8;
+  --surface-3: #E2EAF3;
+  --border: #D7E1EB;
+  --border-2: #B4C5D6;
+  --accent: #F08A00;
+  --accent-hover: #D97706;
+  --accent-soft: rgba(240, 138, 0, 0.10);
+  --ok: #17A673;
+  --ok-soft: rgba(23, 166, 115, 0.12);
+  --warn: #C0762A;
+  --warn-soft: rgba(192, 118, 42, 0.12);
+  --danger: #D43A40;
+  --danger-soft: rgba(212, 58, 64, 0.10);
+  --info: #2E7FC2;
+  --text: #16232F;
+  --text-2: #496072;
+  --text-3: #8AA0B2;
+  --shadow: 0 10px 30px rgba(31, 45, 60, 0.12);
+}
+body[data-theme="light"] .topbar { background: rgba(255, 255, 255, 0.9); border-bottom: 1px solid var(--border); }
+body[data-theme="light"] .btn:hover:not(:disabled) { background: var(--surface-3); }
+body[data-theme="light"] .btn-danger { color: #B53338; }
+body[data-theme="light"] .error-box { color: #B53338; }
+body[data-theme="light"] .led.stopped { background: #9AAEBE; }
 html { min-width: 1080px; }
 body {
   margin: 0;
@@ -449,6 +478,10 @@ select.input { cursor: pointer; }
     <header class="topbar">
       <div class="topbar-title" id="topbar-title">实例</div>
       <div class="topbar-right">
+        <button class="btn btn-ghost btn-sm" id="btn-theme" title="切换深色 / 浅色主题">
+          <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <span id="theme-label">浅色</span>
+        </button>
         <div class="panel-switch" id="panel-switch">
           <button class="ps-btn active" data-panel="aws" title="AWS 光帆实例控制台">AWS 光帆</button>
           <button class="ps-btn" data-panel="oci" title="甲骨文 OCI 实例控制台">甲骨文 OCI</button>
@@ -859,6 +892,31 @@ var Auth = (function () {
    ============================================================ */
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+/* ---------- 主题切换（深色 / 浅色，记忆在 localStorage）---------- */
+function applyTheme(theme) {
+  document.body.setAttribute('data-theme', theme);
+  try { localStorage.setItem('cc-theme', theme); } catch (e) { /* 隐私模式忽略 */ }
+  const icon = document.querySelector('#theme-icon');
+  const label = document.querySelector('#theme-label');
+  if (!icon || !label) return;
+  if (theme === 'light') {
+    icon.innerHTML = '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>';
+    label.textContent = '深色';
+  } else {
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+    label.textContent = '浅色';
+  }
+}
+(function initTheme() {
+  let saved = 'dark';
+  try { saved = localStorage.getItem('cc-theme') || 'dark'; } catch (e) { /* 忽略 */ }
+  applyTheme(saved);
+  const btn = document.querySelector('#btn-theme');
+  if (btn) btn.addEventListener('click', function () {
+    applyTheme(document.body.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+  });
+})();
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -1914,6 +1972,19 @@ async function renderSettings() {
       <div id="set-result"></div>
     </div>
 
+    <div class="form-card" style="max-width:640px">
+      <h3>数据备份 / 恢复</h3>
+      <div class="tip" style="margin-bottom:10px">
+        导出包含：登录账号、AWS 凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同你的账号密码，请妥善保管、切勿外传。</b>重装容器后，在设置页导入即可全部恢复，无需重新配置。
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-accent" id="set-backup-export" type="button">⬇ 导出备份</button>
+        <button class="btn" id="set-backup-import" type="button">⬆ 导入恢复</button>
+        <input type="file" id="set-backup-file" accept=".json,application/json" style="display:none">
+      </div>
+      <div id="set-backup-result" style="margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>
+    </div>
+
     <div class="info-box" style="max-width:640px">
       <b>如何获取凭证：</b><br>
       1. 打开 AWS 控制台 → IAM → 用户 → 创建用户（或使用现有用户）；<br>
@@ -1922,6 +1993,68 @@ async function renderSettings() {
       <b>安全提示：</b>凭证保存在本机 <code>aws-lightsail-panel/aws-credentials.json</code>，签名由本地代理完成；浏览器不再持有密钥。请勿把该文件、页面截图或 AK/SK 发给任何人。若密钥曾泄露（例如出现在截图/聊天中），请到 AWS 控制台删除并重建。
     </div>
   `;
+
+  // ---- 数据备份：导出 / 恢复 ----
+  const bkExport = $('#set-backup-export');
+  if (bkExport) {
+    bkExport.addEventListener('click', async () => {
+      const box = $('#set-backup-result');
+      box.textContent = '正在打包备份…';
+      try {
+        const r = await fetch(getConfigUrl().replace('/config', '/backup'));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const ts = new Date(), pad = n => String(n).padStart(2, '0');
+        const name = 'cloud-console-backup-' + ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + '-' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.json';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        box.textContent = '备份已导出：' + name + '（含全部账号、凭证与电报配置，请妥善保管）';
+        box.style.color = '';
+      } catch (e) {
+        box.textContent = '导出失败：' + e.message;
+        box.style.color = 'var(--warn)';
+      }
+    });
+  }
+  const bkImport = $('#set-backup-import');
+  const bkFile = $('#set-backup-file');
+  if (bkImport && bkFile) {
+    bkImport.addEventListener('click', () => bkFile.click());
+    bkFile.addEventListener('change', async () => {
+      const f = bkFile.files && bkFile.files[0];
+      bkFile.value = '';
+      if (!f) return;
+      if (!window.confirm('导入备份将覆盖当前所有账号、凭证与电报配置，确定继续吗？')) return;
+      const box = $('#set-backup-result');
+      box.textContent = '正在恢复…';
+      try {
+        const text = await f.text();
+        const r = await fetch(getConfigUrl().replace('/config', '/backup/restore'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: text
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          box.textContent = d.message;
+          box.style.color = '';
+          toast('数据恢复成功', 'ok');
+          setTimeout(() => { location.hash = '#/instances'; location.reload(); }, 800);
+        } else {
+          box.textContent = d.error || '恢复失败';
+          box.style.color = 'var(--warn)';
+        }
+      } catch (e) {
+        box.textContent = '恢复失败：' + e.message;
+        box.style.color = 'var(--warn)';
+      }
+    });
+  }
 
   const migrateBtn = $('#set-migrate');
   if (migrateBtn && legacy) {
