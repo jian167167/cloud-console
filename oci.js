@@ -172,6 +172,12 @@ function ociRequest({ service, region, method, urlPath, body }, cfg, timeoutMs) 
       signLines.push('content-type: application/json');
       signLines.push('x-content-sha256: ' + sha);
       headerNames.push('content-length', 'content-type', 'x-content-sha256');
+    } else {
+      // OCI 要求所有请求携带 content-length 与 x-content-sha256（空 body 也有标准哈希），
+      // 否则 Node 会以 chunked 编码发送无 body 的 POST，OCI 认证中间件拒绝（401 NotAuthenticated）
+      signLines.push('content-length: 0');
+      signLines.push('x-content-sha256: ' + sha);
+      headerNames.push('content-length', 'x-content-sha256');
     }
     const signingString = signLines.join('\n');
 
@@ -197,6 +203,9 @@ function ociRequest({ service, region, method, urlPath, body }, cfg, timeoutMs) 
     if (hasBody) {
       headers['content-type'] = 'application/json';
       headers['content-length'] = String(bodyBuf.length);
+      headers['x-content-sha256'] = sha;
+    } else {
+      headers['content-length'] = '0';
       headers['x-content-sha256'] = sha;
     }
 
