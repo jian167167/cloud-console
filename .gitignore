@@ -11,7 +11,6 @@ private*/
 # ===== 依赖与运行时（npm install 自动安装） =====
 node_modules/
 node.exe
-vendor/
 *.log
 
 # ===== 备份 / 临时 =====
