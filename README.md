@@ -55,6 +55,9 @@ docker compose up -d
 
 ## 目录结构
 
+> 本目录即完整项目：本地双击 `启动面板.bat` 即可运行（自带 node.exe），Docker 部署见 `docker/`。
+> 凭证 / 私钥 / node.exe / node_modules 已被 `.gitignore` 排除，不会上传到 GitHub。
+
 ```
 ├── server.js          Node 后端（账号系统 + AWS 代理 + OCI 挂载）
 ├── oci.js             OCI 签名后端
