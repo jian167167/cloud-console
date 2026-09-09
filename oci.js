@@ -172,9 +172,9 @@ function ociRequest({ service, region, method, urlPath, body }, cfg, timeoutMs) 
       signLines.push('content-type: application/json');
       signLines.push('x-content-sha256: ' + sha);
       headerNames.push('content-length', 'content-type', 'x-content-sha256');
-    } else {
-      // OCI 要求所有请求携带 content-length 与 x-content-sha256（空 body 也有标准哈希），
-      // 否则 Node 会以 chunked 编码发送无 body 的 POST，OCI 认证中间件拒绝（401 NotAuthenticated）
+    } else if (method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD' && method.toUpperCase() !== 'DELETE') {
+      // Node 对无 body 的 POST/PUT/PATCH 默认以 chunked 编码发送，OCI 认证中间件会拒绝（401 NotAuthenticated）。
+      // 显式携带 content-length: 0 与 x-content-sha256（空 body 的标准哈希）并纳入签名；GET/HEAD/DELETE 保持原样。
       signLines.push('content-length: 0');
       signLines.push('x-content-sha256: ' + sha);
       headerNames.push('content-length', 'x-content-sha256');
@@ -204,7 +204,7 @@ function ociRequest({ service, region, method, urlPath, body }, cfg, timeoutMs) 
       headers['content-type'] = 'application/json';
       headers['content-length'] = String(bodyBuf.length);
       headers['x-content-sha256'] = sha;
-    } else {
+    } else if (method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD' && method.toUpperCase() !== 'DELETE') {
       headers['content-length'] = '0';
       headers['x-content-sha256'] = sha;
     }
