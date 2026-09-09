@@ -21,6 +21,7 @@ fi
 echo "==> 1/3 获取最新代码 ..."
 if [ -d "$APP_DIR/.git" ]; then
   cd "$APP_DIR" && git pull --ff-only
+  rm -f "$APP_DIR/node_modules/.install-ok"
   echo "    已更新到最新版本"
 else
   rm -rf "$APP_DIR"

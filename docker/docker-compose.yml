@@ -6,9 +6,8 @@ services:
     ports:
       - "8088:8080"
     volumes:
-      - ../:/app:ro
+      - ../:/app
       - ./data:/data
-      - deps:/app/node_modules
     environment:
       - PORT=8080
       - ALLOW_LAN=1
@@ -18,8 +17,5 @@ services:
       - SSH_PATH=/usr/bin/ssh
     command: >
       sh -c "apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null 2>&1 || true;
-             [ -f /app/node_modules/.install-ok ] || (npm install --omit=dev >/dev/null 2>&1 && touch /app/node_modules/.install-ok) || true;
+             [ -f /app/node_modules/.install-ok ] || (cd /app && npm install --omit=dev >/dev/null 2>&1 && touch /app/node_modules/.install-ok) || true;
              exec node /app/server.js"
-
-volumes:
-  deps:
