@@ -47,7 +47,7 @@ const ROOT = __dirname;
 const LEGACY_CREDS_FILE = process.env.CREDS_FILE || path.join(ROOT, 'aws-credentials.json');
 const LEGACY_OCI_FILE = process.env.OCI_CREDS_FILE || path.join(ROOT, 'oci-credentials.json');
 // 数据目录：账号库 / 会话 / 按账号隔离的凭证都存这里（容器部署时挂 /data）
-const APP_VERSION = '202609100412'; // 每次发布更新：YYYYMMDDHHMM
+const APP_VERSION = '202609100422'; // 每次发布更新：YYYYMMDDHHMM
 const DATA_DIR = process.env.DATA_DIR || (process.env.CREDS_FILE ? path.dirname(process.env.CREDS_FILE) : ROOT);
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
@@ -854,6 +854,7 @@ const server = http.createServer((req, res) => {
         upRes.on('end', () => {
           if (NOTIFY_AWS_ACTIONS[payload.action] && (upRes.statusCode || 500) === 200) {
             const inst = (payload.params && payload.params.instanceName) || '';
+            console.log('[NOTIFY] AWS ' + payload.action + ' -> ' + (upRes.statusCode || 500) + ' user=' + req.user + ' 触发通知');
             tgNotify.notify(req.user,
               '🖥️ AWS 光帆 · ' + NOTIFY_AWS_ACTIONS[payload.action] + '通知\n账号：' + (payload.group || creds.name) + '\n区域：' + region + '\n实例：' + inst + '\n结果：成功\n时间：' + tgNotify.fmtNow(), null, true);
           }

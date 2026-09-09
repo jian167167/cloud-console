@@ -80,7 +80,7 @@ function sendHttp(apiBase, token, chatId, text, cb) {
     res.on('end', () => { try { cb(null, res.statusCode || 500, d); } catch (e) { /* noop */ } });
   });
   req.setTimeout(15000, () => { req.destroy(new Error('Telegram 请求超时（15 秒）')); });
-  req.on('error', (e) => { try { cb(e); } catch (err) { /* noop */ } });
+  req.on('error', (e) => { console.error('[TG] 发送失败: ' + (e && e.message)); try { cb(e); } catch (err) { /* noop */ } });
   req.write(payload);
   req.end();
 }
