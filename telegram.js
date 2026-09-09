@@ -28,7 +28,7 @@ function tgFile(user) {
 
 /** 读取配置；文件缺失或损坏时返回默认值 */
 function load(user) {
-  const def = { enabled: false, bot_token: '', chat_id: '', api_base: 'api.telegram.org' };
+  const def = { enabled: false, bot_token: '', chat_id: '', api_base: 'api.telegram.org', otp_enabled: false };
   try {
     const c = JSON.parse(fs.readFileSync(tgFile(user), 'utf8'));
     return {
@@ -36,6 +36,7 @@ function load(user) {
       bot_token: String(c.bot_token || ''),
       chat_id: String(c.chat_id || ''),
       api_base: String(c.api_base || '').trim() || 'api.telegram.org',
+      otp_enabled: !!c.otp_enabled,
     };
   } catch (e) {
     return def;
@@ -51,6 +52,7 @@ function save(user, cfg) {
     bot_token: cfg.bot_token !== undefined && String(cfg.bot_token).trim() !== '' ? String(cfg.bot_token).trim() : prev.bot_token,
     chat_id: cfg.chat_id !== undefined && String(cfg.chat_id).trim() !== '' ? String(cfg.chat_id).trim() : prev.chat_id,
     api_base: cfg.api_base !== undefined && String(cfg.api_base).trim() !== '' ? String(cfg.api_base).trim().replace(/^https?:\/\//, '') : prev.api_base,
+    otp_enabled: cfg.otp_enabled !== undefined ? !!cfg.otp_enabled : !!prev.otp_enabled,
   };
   try {
     fs.writeFileSync(tgFile(user), JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });

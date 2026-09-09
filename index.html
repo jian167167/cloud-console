@@ -382,7 +382,8 @@ select.input { cursor: pointer; }
 .auth-btn { width: 100%; padding: 11px 0; font-size: 15px; margin-top: 4px; }
 .auth-msg { min-height: 20px; color: var(--danger, #ff5a5f); font-size: 13px; text-align: center; margin-top: 10px; }
 .auth-hint { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); color: var(--text-3); font-size: 12px; line-height: 1.7; text-align: center; }
-.auth-user { color: var(--text-2); font-size: 13px; margin-right: 2px; white-space: nowrap; }
+.auth-user { color: var(--text-2); font-size: 13px; margin-right: 2px; white-space: nowrap; cursor: pointer; user-select: none; }
+.auth-otp-hint { font-size: 12px; color: var(--text-3); text-align: left; margin: -4px 0 2px; line-height: 1.6; }
 .modal-mask { position: absolute; inset: 0; background: rgba(4, 10, 16, 0.72); backdrop-filter: blur(2px); }
 .modal { position: relative; background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; width: 460px; max-width: calc(100vw - 40px); box-shadow: var(--shadow); padding: 22px; }
 .modal h3 { font-size: 15px; margin-bottom: 10px; }
@@ -612,20 +613,14 @@ select.input { cursor: pointer; }
   <div class="auth-card">
     <div class="auth-logo">☁ <span>云服务器控制台</span></div>
     <div class="auth-sub">AWS 光帆 · 甲骨文 OCI</div>
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="atab-login">登 录</button>
-      <button class="auth-tab" id="atab-register">注册账号</button>
-    </div>
     <div class="auth-form" id="auth-form-login">
       <input class="auth-input" id="auth-user" placeholder="账号" autocomplete="username">
       <input class="auth-input" id="auth-pass" type="password" placeholder="密码" autocomplete="current-password">
+      <div id="otp-wrap" style="display:none">
+        <input class="auth-input" id="otp-code" type="text" inputmode="numeric" maxlength="6" placeholder="电报收到的 6 位验证码" autocomplete="one-time-code">
+        <div class="auth-otp-hint" id="otp-hint"></div>
+      </div>
       <button class="btn btn-accent auth-btn" id="btn-auth-login">登 录</button>
-    </div>
-    <div class="auth-form" id="auth-form-register" style="display:none">
-      <input class="auth-input" id="reg-user" placeholder="账号（3-32 位字母/数字/_-）" autocomplete="username">
-      <input class="auth-input" id="reg-pass" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password">
-      <input class="auth-input" id="reg-pass2" type="password" placeholder="确认密码" autocomplete="new-password">
-      <button class="btn btn-accent auth-btn" id="btn-auth-register">注册并登录</button>
     </div>
     <div class="auth-msg" id="auth-msg"></div>
     <div class="auth-hint">云凭证按账号保存在服务器端，换任何电脑登录本账号即可继续使用，无需重新配置</div>
@@ -654,13 +649,7 @@ var Auth = (function () {
   function hideAuth() { el('auth-modal').style.display = 'none'; }
   function authMsg(t) { el('auth-msg').textContent = t || ''; }
 
-  function switchTab(tab) {
-    el('atab-login').classList.toggle('active', tab === 'login');
-    el('atab-register').classList.toggle('active', tab === 'register');
-    el('auth-form-login').style.display = tab === 'login' ? '' : 'none';
-    el('auth-form-register').style.display = tab === 'register' ? '' : 'none';
-    authMsg('');
-  }
+  function switchTab() { authMsg(''); }
 
   function afterLogin(user) {
     authed = true;
@@ -718,28 +707,106 @@ var Auth = (function () {
       });
       var d = await r.json().catch(function () { return {}; });
       if (r.ok && d.ok) return afterLogin(d.user);
+      if (r.ok && d.otp_required) {
+        el('otp-wrap').style.display = '';
+        el('otp-hint').textContent = d.message || '验证码已发送到您的电报，请查收';
+        el('btn-auth-login').textContent = '验证并登录';
+        el('otp-code').focus();
+        return;
+      }
       authMsg(d.error || '登录失败');
     } catch (e) { authMsg('无法连接服务器：' + e.message); }
   }
 
-  async function register() {
-    var u = el('reg-user').value.trim();
-    var p = el('reg-pass').value;
-    var p2 = el('reg-pass2').value;
-    if (!u || !p) return authMsg('请输入账号和密码');
-    if (p.length < 6) return authMsg('密码至少 6 位');
-    if (p !== p2) return authMsg('两次输入的密码不一致');
+  async function verifyOtp() {
+    var u = el('auth-user').value.trim();
+    var code = el('otp-code').value.trim();
+    if (!code) return authMsg('请输入电报收到的 6 位验证码');
     authMsg('');
     try {
-      var r = await fetch('/api/auth/register', {
+      var clientIp = await detectPublicIp();
+      var r = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password: p })
+        body: JSON.stringify({ username: u, code: code, clientIp: clientIp })
       });
       var d = await r.json().catch(function () { return {}; });
       if (r.ok && d.ok) return afterLogin(d.user);
-      authMsg(d.error || '注册失败');
+      authMsg(d.error || '验证失败');
     } catch (e) { authMsg('无法连接服务器：' + e.message); }
+  }
+
+  /* 注册功能已关闭：首次部署自带默认账号 admin（密码 admin123），登录后在「账号」设置中修改 */
+
+  /* ---------- 账号设置弹窗（修改账号名/密码 + 二次登录验证码开关） ---------- */
+  function openAccountModal() {
+    var root = document.querySelector('#modal-root');
+    root.innerHTML = '' +
+      '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal" style="width:540px;max-width:94vw" role="dialog">' +
+      '<h3>👤 账号设置</h3>' +
+      '<div class="msg" style="margin-top:10px">' +
+      '<label style="display:block;margin-bottom:10px">新账号名（留空 = 不变）' +
+      '<input id="acc-user" type="text" placeholder="3-32 位字母/数字/_-" autocomplete="off" style="margin-top:4px"></label>' +
+      '<label style="display:block;margin-bottom:10px">新密码（留空 = 不变）' +
+      '<input id="acc-pass" type="password" placeholder="至少 6 位" autocomplete="new-password" style="margin-top:4px"></label>' +
+      '<label style="display:block;margin-bottom:10px">确认新密码' +
+      '<input id="acc-pass2" type="password" placeholder="再次输入新密码" autocomplete="new-password" style="margin-top:4px"></label>' +
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input id="acc-otp" type="checkbox" style="width:auto"> 二次登录验证码（开启后登录需输入电报收到的 6 位验证码，2 分钟有效）</label>' +
+      '<div id="acc-otp-hint" style="font-size:12px;color:var(--text-3);margin-top:4px;line-height:1.6"></div>' +
+      '</div>' +
+      '<div id="acc-result" style="min-height:18px;margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>' +
+      '<div class="actions">' +
+      '<button class="btn" data-close="1">关闭</button>' +
+      '<button id="acc-save" class="btn btn-accent">保存</button>' +
+      '</div>' +
+      '</div>';
+    root.classList.add('show');
+    var box = root.querySelector('#acc-result');
+    fetch('/api/telegram').then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.otp_enabled) {
+        root.querySelector('#acc-otp').checked = true;
+        root.querySelector('#acc-otp-hint').textContent = '已开启：登录时需要电报验证码';
+      } else {
+        root.querySelector('#acc-otp-hint').textContent = (d && d.configured) ? '电报机器人已配置，可开启二次登录验证码' : '提示：需先配置电报机器人（左侧「电报机器人」）才能开启二次登录验证码';
+      }
+    }).catch(function () {});
+    root.querySelector('#acc-save').addEventListener('click', async function () {
+      var nu = root.querySelector('#acc-user').value.trim();
+      var np = root.querySelector('#acc-pass').value;
+      var np2 = root.querySelector('#acc-pass2').value;
+      if (!nu && !np) { box.textContent = '请填写要修改的账号名或密码'; box.style.color = 'var(--warn)'; return; }
+      if (np && np.length < 6) { box.textContent = '密码至少 6 位'; box.style.color = 'var(--warn)'; return; }
+      if (np !== np2) { box.textContent = '两次输入的新密码不一致'; box.style.color = 'var(--warn)'; return; }
+      box.textContent = '保存中…'; box.style.color = '';
+      try {
+        var r = await fetch('/api/auth/change', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: nu, password: np })
+        });
+        var d = await r.json().catch(function () { return {}; });
+        if (!(r.ok && d.ok)) { box.textContent = d.error || '修改失败'; box.style.color = 'var(--warn)'; return; }
+        if (d.user) {
+          currentUser = d.user;
+          el('auth-user-chip').textContent = '账号：' + d.user;
+        }
+        var r2 = await fetch('/api/telegram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otp_enabled: root.querySelector('#acc-otp').checked })
+        });
+        var d2 = await r2.json().catch(function () { return {}; });
+        box.textContent = d.message || '修改成功';
+        box.style.color = '';
+        if (r2.ok && d2.ok) {
+          toast((root.querySelector('#acc-otp').checked ? '二次登录验证码已开启 ✓' : '二次登录验证码已关闭') + '（下次登录生效）', 'ok');
+        } else {
+          toast(d2.error || '账号修改成功，但二次验证码设置失败', 'err');
+        }
+        setTimeout(function () { closeModalRoot(); }, 1100);
+      } catch (e) { box.textContent = '保存失败：' + e.message; box.style.color = 'var(--warn)'; }
+    });
   }
 
   async function logout() {
@@ -750,17 +817,15 @@ var Auth = (function () {
     el('btn-logout').style.display = 'none';
     el('auth-user').value = '';
     el('auth-pass').value = '';
-    el('reg-user').value = '';
-    el('reg-pass').value = '';
-    el('reg-pass2').value = '';
-    switchTab('login');
+    el('otp-code').value = '';
+    el('otp-wrap').style.display = 'none';
+    el('btn-auth-login').textContent = '登 录';
+    switchTab();
     authMsg('已退出登录');
     showAuth();
   }
 
   async function init() {
-    el('atab-login').addEventListener('click', function () { switchTab('login'); });
-    el('atab-register').addEventListener('click', function () { switchTab('register'); });
   /* ---------- 电报机器人通知 ---------- */
   function tgApiUrl(path) { return (location.protocol === 'file:' ? 'http://localhost:8080' : '') + path; }
 
@@ -841,15 +906,17 @@ var Auth = (function () {
   }
   document.querySelector('#nav-backup').addEventListener('click', openBackupModal);
 
-    el('btn-auth-login').addEventListener('click', login);
-    el('btn-auth-register').addEventListener('click', register);
+    el('btn-auth-login').addEventListener('click', function () {
+      if (el('otp-wrap').style.display !== 'none') verifyOtp(); else login();
+    });
     el('btn-logout').addEventListener('click', logout);
+    el('auth-user-chip').addEventListener('click', openAccountModal);
     ['auth-user', 'auth-pass'].forEach(function (id) {
-      el(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+      el(id).addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { if (el('otp-wrap').style.display !== 'none') verifyOtp(); else login(); }
+      });
     });
-    ['reg-user', 'reg-pass', 'reg-pass2'].forEach(function (id) {
-      el(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') register(); });
-    });
+    el('otp-code').addEventListener('keydown', function (e) { if (e.key === 'Enter') verifyOtp(); });
     try {
       var r = await fetch('/api/auth/me');
       if (r.ok) {

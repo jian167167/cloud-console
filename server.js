@@ -121,6 +121,39 @@ function migrateLegacyCreds(user) {
   } catch (e) { /* 迁移失败不阻塞注册 */ }
 }
 
+/* ---------------- 二次登录验证码（2FA，2 分钟有效） ---------------- */
+const OTP_TTL_MS = 2 * 60 * 1000;
+const otpStore = new Map();
+function issueOtp(user) {
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const rec = { user, code, expiresAt: Date.now() + OTP_TTL_MS };
+  otpStore.set(user, rec);
+  try {
+    fs.mkdirSync(path.dirname(path.join(userDir(user), 'otp-state.json')), { recursive: true });
+    fs.writeFileSync(path.join(userDir(user), 'otp-state.json'), JSON.stringify(rec), { encoding: 'utf8', mode: 0o600 });
+  } catch (e) { /* noop */ }
+  return rec;
+}
+function checkOtp(user, code) {
+  const rec = otpStore.get(user) || null;
+  if (!rec) return { ok: false, error: '验证码不存在或已失效，请重新登录获取' };
+  if (Date.now() > rec.expiresAt) { otpStore.delete(user); return { ok: false, error: '验证码已过期（2 分钟有效），请重新登录获取' }; }
+  if (String(code).trim() !== rec.code) return { ok: false, error: '验证码不正确' };
+  otpStore.delete(user);
+  try { fs.rmSync(path.join(userDir(user), 'otp-state.json'), { force: true }); } catch (e) { /* noop */ }
+  return { ok: true };
+}
+/** 首次部署自动创建默认账号（admin / admin123）；已有账号则不干预 */
+function ensureDefaultAdmin() {
+  const users = loadUsers();
+  if (Object.keys(users).length === 0) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    users.admin = { salt, hash: hashPassword('admin123', salt), created: Date.now() };
+    saveUsers(users);
+    console.log('  已创建默认账号 admin（密码 admin123），请登录后立即在「账号」设置中修改！');
+  }
+}
+
 function createSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
   const sessions = loadSessions();
@@ -155,7 +188,7 @@ function clearSessionCookie(res) {
 
 /** 除 /api/auth/* 外，所有 /api/* 与 /ws 都需要登录 */
 function isPublicApi(urlPath) {
-  return urlPath === '/api/auth/register' || urlPath === '/api/auth/login' || urlPath === '/api/auth/me';
+  return urlPath === '/api/auth/register' || urlPath === '/api/auth/login' || urlPath === '/api/auth/verify-otp' || urlPath === '/api/auth/me';
 }
 
 /* ---------------- 账号凭证存储（按账号隔离，支持多凭证组） ----------------
@@ -339,29 +372,9 @@ const server = http.createServer((req, res) => {
 
   const urlPath0 = req.url.split('?')[0];
 
-  // ---- 账号：注册 ----
+  // ---- 账号：注册（已关闭，使用内置默认账号 admin）----
   if (req.method === 'POST' && urlPath0 === '/api/auth/register') {
-    let raw = '';
-    req.on('data', (chunk) => { raw += chunk; });
-    req.on('end', () => {
-      const payload = parseJsonBody(raw);
-      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
-      const username = String(payload.username || '').trim();
-      const password = String(payload.password || '');
-      if (!isValidUsername(username)) return sendJson(res, 400, { error: '账号需为 3-32 位字母、数字、下划线或中划线' });
-      if (password.length < 6) return sendJson(res, 400, { error: '密码至少 6 位' });
-      const users = loadUsers();
-      if (users[username]) return sendJson(res, 409, { error: '该账号已存在，请直接登录' });
-      const salt = crypto.randomBytes(16).toString('hex');
-      users[username] = { salt, hash: hashPassword(password, salt), created: Date.now() };
-      saveUsers(users);
-      migrateLegacyCreds(username); // 继承旧版全局凭证（AWS / OCI）
-      opLog(username, '注册账号');
-      const token = createSession(username);
-      setSessionCookie(res, token);
-      return sendJson(res, 200, { ok: true, user: username });
-    });
-    return;
+    return sendJson(res, 403, { error: '注册已关闭：首次部署自带默认账号 admin（密码 admin123），请直接登录后在「账号」设置中修改' });
   }
 
   // ---- 账号：登录 ----
@@ -377,6 +390,18 @@ const server = http.createServer((req, res) => {
       const u = users[username];
       if (!u || !verifyPassword(password, u.salt, u.hash)) {
         return sendJson(res, 401, { error: '账号或密码不正确' });
+      }
+      // ---- 二次登录验证码（2FA）：已开启则先发码，验证通过后才建立会话 ----
+      if (tgNotify.load(username).otp_enabled) {
+        const otp = issueOtp(username);
+        const sent = tgNotify.notify(username,
+          '🔐 登录面板需二次验证\n账号：' + username + '\n验证码：' + otp.code + '\n（2 分钟内有效；如非本人操作请忽略并尽快修改密码）',
+          null, true);
+        if (!sent) {
+          return sendJson(res, 400, { error: '已开启二次验证码，但电报机器人未配置完整，无法发送验证码，请先在电报机器人设置中检查' });
+        }
+        opLog(username, '登录（等待二次验证码）');
+        return sendJson(res, 200, { ok: true, otp_required: true, user: username, message: '验证码已发送到您的电报，请查收（2 分钟内有效）' });
       }
       const token = createSession(username);
       setSessionCookie(res, token);
@@ -403,6 +428,29 @@ const server = http.createServer((req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
+  // ---- 账号：二次验证码校验（2FA 第二步）----
+  if (req.method === 'POST' && urlPath0 === '/api/auth/verify-otp') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      const username = String(payload.username || '').trim();
+      const users = loadUsers();
+      if (!users[username]) return sendJson(res, 401, { error: '账号不存在' });
+      const r = checkOtp(username, String(payload.code || ''));
+      if (!r.ok) return sendJson(res, 401, { error: r.error });
+      const token = createSession(username);
+      setSessionCookie(res, token);
+      opLog(username, '登录（二次验证通过）');
+      const loginIp = String(payload.clientIp || '').trim() || getClientIp(req);
+      tgNotify.notify(username,
+        '✅ 二次验证通过，登录成功\n账号：' + username + '\n来源 IP：' + loginIp + '\n设备：' + String(req.headers['user-agent'] || '').slice(0, 80) + '\n时间：' + tgNotify.fmtNow() + '\n\n⚠️ 如非本人操作，请立即修改密码！');
+      return sendJson(res, 200, { ok: true, user: username });
+    });
+    return;
+  }
+
   // ---- 账号：当前登录用户 ----
   if (req.method === 'GET' && urlPath0 === '/api/auth/me') {
     const user = getUserFromReq(req);
@@ -419,6 +467,62 @@ const server = http.createServer((req, res) => {
     req.user = user;
   }
 
+  // ---- 账号：修改账号名 / 密码（登录后）----
+  if (req.method === 'POST' && urlPath0 === '/api/auth/change') {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const payload = parseJsonBody(raw);
+      if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      const oldUser = req.user;
+      if (!oldUser) return sendJson(res, 401, { error: '未登录' });
+      const users = loadUsers();
+      if (!users[oldUser]) return sendJson(res, 401, { error: '当前账号不存在' });
+      const newName = payload.username !== undefined ? String(payload.username).trim() : '';
+      const newPass = payload.password !== undefined ? String(payload.password) : '';
+      if (!newName && !newPass) return sendJson(res, 400, { error: '请填写要修改的账号名或密码（留空表示不变）' });
+      let target = oldUser;
+      if (newName && newName !== oldUser) {
+        if (!isValidUsername(newName)) return sendJson(res, 400, { error: '账号需为 3-32 位字母、数字、下划线或中划线' });
+        if (users[newName]) return sendJson(res, 409, { error: '该账号名已被使用' });
+        if (fs.existsSync(userDir(newName))) return sendJson(res, 409, { error: '目标账号数据目录已存在，无法改名' });
+        target = newName;
+      }
+      try {
+        const base = Object.assign({}, users[oldUser]);
+        if (newPass) {
+          if (String(newPass).length < 6) return sendJson(res, 400, { error: '密码至少 6 位' });
+          const salt = crypto.randomBytes(16).toString('hex');
+          base.salt = salt;
+          base.hash = hashPassword(newPass, salt);
+        }
+        base.updated = Date.now();
+        users[target] = base;
+        if (target !== oldUser) {
+          delete users[oldUser];
+          const oldDir = userDir(oldUser);
+          const newDir = userDir(target);
+          if (fs.existsSync(oldDir)) {
+            fs.mkdirSync(path.dirname(newDir), { recursive: true });
+            fs.renameSync(oldDir, newDir);
+          }
+          const sessions = loadSessions();
+          let changed = false;
+          for (const k of Object.keys(sessions)) {
+            if (sessions[k].user === oldUser) { sessions[k].user = target; changed = true; }
+          }
+          if (changed) saveSessions(sessions);
+        }
+        saveUsers(users);
+        opLog(oldUser, '修改账号/密码 → ' + target + (newName ? '' : '（仅改密码）'));
+        return sendJson(res, 200, { ok: true, user: target, message: '修改成功' + (target !== oldUser ? '，账号名已更新' : '') });
+      } catch (e) {
+        return sendJson(res, 500, { error: '修改失败：' + e.message });
+      }
+    });
+    return;
+  }
+
   // ---- 操作日志 ----
   if (req.method === 'GET' && urlPath0 === '/api/telegram') {
     const tc = tgNotify.load(req.user);
@@ -427,6 +531,7 @@ const server = http.createServer((req, res) => {
       bot_token_tail: tgNotify.safeTail(tc.bot_token),
       chat_id: tc.chat_id,
       api_base: tc.api_base,
+      otp_enabled: !!tc.otp_enabled,
       configured: !!(tc.bot_token && tc.chat_id),
     });
   }
@@ -437,12 +542,18 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       const payload = parseJsonBody(raw);
       if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
+      if (payload.otp_enabled) {
+        const _tc = tgNotify.load(req.user);
+        if (!(_tc.bot_token && _tc.chat_id)) {
+          return sendJson(res, 400, { error: '开启二次登录验证码需要先配置电报机器人的 Token 和 Chat ID' });
+        }
+      }
       try {
         tgNotify.save(req.user, payload);
       } catch (e) {
         return sendJson(res, 400, { error: e.message });
       }
-      opLog(req.user, '保存电报通知配置');
+      opLog(req.user, '保存电报通知配置' + (payload.otp_enabled ? '（二次登录验证码已开启）' : ''));
       if (payload.test) {
         tgNotify.notify(req.user,
           '✅ 电报通知测试成功\n账号：' + req.user + '\n时间：' + tgNotify.fmtNow() + '\n\n今后实例操作与面板登录提醒都会发送到这里。',
@@ -702,8 +813,9 @@ server.listen(PORT, () => {
   console.log('');
   console.log('  云服务器控制台（AWS 光帆 + 甲骨文 OCI）已启动');
   console.log('  请在浏览器打开: http://localhost:' + PORT);
+  ensureDefaultAdmin();
   const userCount = Object.keys(loadUsers()).length;
-  console.log('  账号系统：' + (userCount ? '已注册 ' + userCount + ' 个账号，打开页面用账号登录' : '首次打开页面请先「注册账号」（注册后自动继承旧版凭证）'));
+  console.log('  账号系统：' + (userCount ? '已注册 ' + userCount + ' 个账号，打开页面用账号登录' : '无账号'));
   console.log('  凭证目录：' + DATA_DIR);
   console.log('  接口限制：/api 需登录；仅允许本机/局域网访问（防端口转发滥用）');
   if (WebSocketServer && SSHClient) {
