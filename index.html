@@ -980,9 +980,11 @@ var Auth = (function () {
     $$('.nav-item').forEach(function (x) {
       if (x.dataset.nav) x.classList.toggle('active', x.dataset.nav === nav);
     });
+    var tb = document.getElementById('topbar-title');
     if (isOci) {
       view.style.display = 'none';
       oci.classList.add('show');
+      if (tb) tb.textContent = '甲骨文 OCI';
       var tab = nav === 'oci-settings' ? 'settings' : 'instances';
       $$('.oci-tabs .ps-btn').forEach(function (b) {
         b.classList.toggle('active', b.dataset.ocitab === tab);
@@ -995,6 +997,7 @@ var Auth = (function () {
     } else {
       oci.classList.remove('show');
       view.style.display = '';
+      if (tb) tb.textContent = nav === 'create' ? '创建实例' : (nav === 'settings' ? 'AWS 设置' : '实例');
     }
   }
   window.__applyNav = function () { applyPanel(navFromHash()); };
@@ -2643,14 +2646,14 @@ function renderInstanceDetailView() {
    ============================================================ */
 async function render() {
   const { path, params } = parseHash();
-  if (path === 'oci') {
+  if (path === 'oci' || path === 'oci-settings') {
     $('#topbar-title').textContent = '甲骨文 OCI';
-    $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === 'oci'));
+    $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === path));
     updateCredsBadge();
     return;
   }
   await loadAwsConfig();
-  const titles = { instances: '实例', create: '创建实例', settings: '设置' };
+  const titles = { instances: '实例', create: '创建实例', settings: 'AWS 设置' };
   $('#topbar-title').textContent = titles[path] || '实例';
   $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === (titles[path] === undefined ? 'instances' : path)));
   updateCredsBadge();
