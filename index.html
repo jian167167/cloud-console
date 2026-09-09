@@ -1237,7 +1237,6 @@ async function renderInstances() {
     const running = counts.running || 0;
     const instRegions = new Set(instances.map(i => i._region || (i.location && i.location.regionName) || '-'));
     const cfgTop = getCreds() || {};
-    const grpOpts = (cfgTop.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === cfgTop.active ? 'selected' : ''}>${esc(g.name)}</option>`).join('');
     const grpBlocks = groups.map(g => `
       <div class="grp-block">
         <div class="grp-head">
@@ -1257,11 +1256,6 @@ async function renderInstances() {
         <div>
           <h1>实例</h1>
           <div class="sub">${cfgTop.accounts ? cfgTop.accounts.length + ' 个账号' : '--'} · 跨 ${instRegions.size} 个区域 · 共 ${instances.length} 台 · ${running} 台运行中${failed ? `（有 ${failed} 个区域读取失败，可能无权限）` : ''}</div>
-          ${(cfgTop.accounts || []).length > 1 ? `
-          <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-            <span class="sub">当前操作账号（创建实例用）</span>
-            <select class="input" id="aws-group-top" style="width:auto;min-width:150px;padding:4px 8px">${grpOpts}</select>
-          </div>` : ''}
         </div>
         <div class="page-actions">
           <span class="count-badge">${instances.length} 台实例</span>
@@ -1270,15 +1264,6 @@ async function renderInstances() {
       ${groups.length === 0
         ? `<div class="empty">${ICONS.info}<div class="title">还没有配置 AWS 凭证</div><div class="desc">可以在「设置」中添加 AWS 账号。</div></div>`
         : grpBlocks}`;
-    const grpTop = $('#aws-group-top');
-    if (grpTop) {
-      grpTop.addEventListener('change', async (e) => {
-        try {
-          await setAwsActiveGroup(e.target.value);
-          toast('当前操作账号已切换为：' + e.target.value, 'ok');
-        } catch (err) { toast(err.message, 'err'); }
-      });
-    }
   } catch (e) {
     view.innerHTML = `
       <div class="page-head"><h1>实例</h1></div>
