@@ -361,7 +361,7 @@ function buildNsgRule(direction, spec) {
 
 /* ---------------- 实例辅助 ---------------- */
 
-async function getPrimaryVnic(computeHost, cfg, instId) {
+async function getPrimaryVnic(cfg, instId) {
   const comp = cfg.compartment;
   const vaRes = await ociRequest({
     service: 'iaas', region: cfg.region, method: 'GET',
@@ -378,7 +378,7 @@ async function getPrimaryVnic(computeHost, cfg, instId) {
   return null;
 }
 
-async function getPrimaryPrivateIpId(computeHost, cfg, vnicId) {
+async function getPrimaryPrivateIpId(cfg, vnicId) {
   const pRes = await ociRequest({
     service: 'iaas', region: cfg.region, method: 'GET',
     urlPath: '/20160918/privateIps?vnicId=' + encodeURIComponent(vnicId),
