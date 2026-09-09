@@ -1973,7 +1973,8 @@ async function renderSettings() {
 let sshState = { ws: null, term: null, fit: null, host: null, username: null };
 
 function getWsUrl() {
-  return location.protocol === 'file:' ? 'ws://localhost:8080/ws' : 'ws://' + location.host + '/ws';
+  if (location.protocol === 'file:') return 'ws://localhost:8080/ws';
+  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
 }
 
 function setSshStatus(text, cls) {
