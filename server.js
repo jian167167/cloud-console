@@ -52,6 +52,14 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const ociBackend = require('./oci');
 
+/* ---------------- 操作日志（内存环形，重启清空） ---------------- */
+const OP_LOG_MAX = 300;
+const opLogs = [];
+function opLog(user, msg) {
+  opLogs.push({ t: Date.now(), u: String(user || ''), m: String(msg).slice(0, 300) });
+  if (opLogs.length > OP_LOG_MAX) opLogs.splice(0, opLogs.length - OP_LOG_MAX);
+}
+
 /* ---------------- 账号系统（注册 / 登录 / 会话） ---------------- */
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 会话 30 天
 
@@ -332,6 +340,7 @@ const server = http.createServer((req, res) => {
       users[username] = { salt, hash: hashPassword(password, salt), created: Date.now() };
       saveUsers(users);
       migrateLegacyCreds(username); // 继承旧版全局凭证（AWS / OCI）
+      opLog(username, '注册账号');
       const token = createSession(username);
       setSessionCookie(res, token);
       return sendJson(res, 200, { ok: true, user: username });
@@ -355,6 +364,7 @@ const server = http.createServer((req, res) => {
       }
       const token = createSession(username);
       setSessionCookie(res, token);
+      opLog(username, '登录');
       return sendJson(res, 200, { ok: true, user: username });
     });
     return;
@@ -363,7 +373,13 @@ const server = http.createServer((req, res) => {
   // ---- 账号：退出 ----
   if (req.method === 'POST' && urlPath0 === '/api/auth/logout') {
     const m = /(?:^|;\s*)session=([^;]+)/.exec(req.headers.cookie || '');
-    if (m) destroySession(m[1]);
+    let logoutUser = '';
+    if (m) {
+      const sessions = loadSessions();
+      if (sessions[m[1]]) logoutUser = sessions[m[1]].user;
+      destroySession(m[1]);
+    }
+    opLog(logoutUser, '退出登录');
     clearSessionCookie(res);
     return sendJson(res, 200, { ok: true });
   }
@@ -382,6 +398,11 @@ const server = http.createServer((req, res) => {
     const user = getUserFromReq(req);
     if (!user) return sendJson(res, 401, { error: '未登录，请先登录账号' });
     req.user = user;
+  }
+
+  // ---- 操作日志 ----
+  if (req.method === 'GET' && urlPath0 === '/api/logs') {
+    return sendJson(res, 200, { logs: opLogs.slice(-OP_LOG_MAX) });
   }
 
   // ---- 查询账号凭证状态（凭证组列表，不回显密钥）----
@@ -403,17 +424,21 @@ const server = http.createServer((req, res) => {
       if (!payload) return sendJson(res, 400, { error: '请求体不是合法 JSON' });
       if (payload.clear) {
         clearCredentials(req.user);
+        opLog(req.user, '清除全部 AWS 凭证');
         return sendJson(res, 200, { ok: true });
       }
       if (payload.action === 'set-active') {
         try {
           const name = String(payload.name || '').trim();
           setActiveCredential(req.user, name);
+          opLog(req.user, '切换 AWS 当前凭证 → ' + name);
           return sendJson(res, 200, { ok: true, active: name });
         } catch (e) { return sendJson(res, 400, { error: e.message }); }
       }
       if (payload.action === 'delete') {
-        deleteCredential(req.user, String(payload.name || '').trim());
+        const delName = String(payload.name || '').trim();
+        deleteCredential(req.user, delName);
+        opLog(req.user, '删除 AWS 凭证：' + delName);
         return sendJson(res, 200, { ok: true });
       }
       if (payload.action === 'save') {
@@ -430,6 +455,7 @@ const server = http.createServer((req, res) => {
         if (ak && !/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
         if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
         saveCredential(req.user, { name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: payload.makeActive !== false });
+        opLog(req.user, (isNew ? '新建 AWS 凭证：' : '更新 AWS 凭证：') + name + '（' + region + '）');
         return sendJson(res, 200, { ok: true, active: name, accessKeyIdTail: ak ? ak.slice(-4) : (prev.accessKeyId ? String(prev.accessKeyId).slice(-4) : ''), region });
       }
       const ak = String(payload.accessKeyId || '').trim();
@@ -469,6 +495,7 @@ const server = http.createServer((req, res) => {
       if (!creds) {
         return sendJson(res, 409, { error: '尚未配置 AWS 凭证：请先在「设置」页填写并保存' });
       }
+      opLog(req.user, 'AWS ' + payload.action + ' region=' + region + ' 账号=' + (payload.group || creds.name));
       const region = payload.region || creds.region;
       if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) {
         return sendJson(res, 400, { error: '区域格式不正确' });
@@ -522,6 +549,7 @@ const server = http.createServer((req, res) => {
   // ---- OCI 面板 API（甲骨文，纯 Node 实现；使用当前账号的凭证文件）----
   if (urlPath.startsWith('/api/oci')) {
     ociBackend.setCredsFile(userOciFile(req.user));
+    opLog(req.user, 'OCI ' + req.method + ' ' + urlPath);
     return ociBackend.handle(req, res, urlPath, req.method, sendJson, isAllowedHost);
   }
 

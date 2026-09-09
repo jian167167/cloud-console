@@ -338,7 +338,7 @@ select.input { cursor: pointer; }
 .step-line { flex: 0 0 40px; height: 1px; background: var(--border-2); margin: 0 12px; }
 
 /* ---------------- Modal / Toast / Busy ---------------- */
-.modal-root { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; }
+.modal-root { position: fixed; inset: 0; z-index: 160; display: none; align-items: center; justify-content: center; }
 .modal-root.show { display: flex; }
 .auth-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(5,12,20,.88); backdrop-filter: blur(6px); }
 .auth-card { width: 380px; max-width: calc(100vw - 40px); background: var(--bg); border: 1px solid var(--border-2); border-radius: 14px; padding: 32px 32px 22px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
@@ -374,6 +374,14 @@ select.input { cursor: pointer; }
 .busy-root.show { display: flex; }
 .spinner { width: 34px; height: 34px; border: 3px solid var(--border-2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------------- 日志 / 反馈 ---------------- */
+.log-body { max-height: 420px; overflow: auto; font-family: var(--mono); font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; }
+.log-line { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+.log-line:last-child { border-bottom: none; }
+.log-t { color: var(--text-3); flex: 0 0 auto; white-space: nowrap; }
+.log-u { color: var(--info); flex: 0 0 auto; }
+.log-m { color: var(--text-2); word-break: break-all; }
 
 /* ---------------- 在线 SSH 终端 ---------------- */
 .ssh-modal { width: 920px; max-width: calc(100vw - 40px); padding: 0; overflow: hidden; }
@@ -450,6 +458,8 @@ select.input { cursor: pointer; }
         </button>
         <span class="auth-user" id="auth-user-chip" style="display:none"></span>
         <button class="btn btn-ghost btn-sm" id="btn-logout" style="display:none">退出</button>
+        <button class="btn btn-ghost btn-sm" id="btn-logs" style="display:none">日志</button>
+        <button class="btn btn-ghost btn-sm" id="btn-feedback" style="display:none">反馈</button>
       </div>
     </header>
     <div class="view" id="view"><div class="empty"><div class="spinner" style="margin:0 auto"></div></div></div>
@@ -483,16 +493,16 @@ select.input { cursor: pointer; }
           <div class="form-card">
             <h3>OCI API 设置（支持多个账号）</h3>
             <div class="field full" style="margin-bottom:12px">
-              <label>当前凭证组</label>
+              <label>当前凭证</label>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <select class="input" id="oci-group" style="flex:1;min-width:180px"></select>
-                <button type="button" id="oci-group-new" class="btn btn-ghost">＋ 新建组</button>
-                <button type="button" id="oci-group-del" class="btn btn-danger" style="display:none">删除当前组</button>
+                <button type="button" id="oci-group-new" class="btn btn-ghost">＋ 新建凭证</button>
+                <button type="button" id="oci-group-del" class="btn btn-danger" style="display:none">删除当前凭证</button>
               </div>
-              <div class="oci-tip" style="margin-top:6px">切换下拉即切换当前使用的甲骨文账号；编辑已有组时私钥留空 = 保持不变。</div>
+              <div class="oci-tip" style="margin-top:6px">切换下拉即切换当前使用的甲骨文账号；编辑已有凭证时私钥留空 = 保持不变。</div>
             </div>
             <div class="field full" style="margin-bottom:4px">
-                <label>凭证组名称 <span class="oci-tip">（填新名字保存 = 新建一组；与现有组同名 = 更新该组）</span></label>
+                <label>凭证名称 <span class="oci-tip">（填新名字保存 = 新建一个凭证；与现有凭证同名 = 更新该凭证）</span></label>
                 <input id="oci-group-name" type="text" placeholder="如：甲骨文A、甲骨文B" autocomplete="off">
               </div>
             <p class="oci-tip">填写 Oracle Cloud API 密钥信息（租户 OCID、用户 OCID、指纹、私钥、区域、分区）。凭证仅保存在服务器本地文件中，不会上传到任何地方。</p>
@@ -608,6 +618,8 @@ var Auth = (function () {
     el('auth-user-chip').textContent = '账号：' + user;
     el('auth-user-chip').style.display = '';
     el('btn-logout').style.display = '';
+    el('btn-logs').style.display = '';
+    el('btn-feedback').style.display = '';
     // 按当前 hash 恢复对应面板（AWS 渲染 / OCI 懒初始化）
     if (panelTarget() === 'oci') {
       var view = document.getElementById('view');
@@ -977,6 +989,69 @@ function confirmDialog({ title, message, confirmText, danger, onConfirm }) {
   const close = () => root.classList.remove('show');
   root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', close));
   $('#modal-confirm').addEventListener('click', async () => { close(); await onConfirm(); });
+}
+function fmtLogTime(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('zh-CN', { hour12: false }); } catch (e) { return ''; }
+}
+async function openLogsModal() {
+  const root = $('#modal-root');
+  root.innerHTML = `
+    <div class="modal-mask" data-close="1"></div>
+    <div class="modal" role="dialog" aria-modal="true" style="width:780px;max-width:calc(100vw - 40px)">
+      <h3>操作日志</h3>
+      <div class="msg" style="margin-bottom:12px">最近操作记录（保存在服务器内存中，重启后清空）。</div>
+      <div id="log-body" class="log-body"><div class="empty"><div class="spinner" style="margin:0 auto"></div></div></div>
+      <div class="actions">
+        <button class="btn btn-ghost" id="log-refresh" type="button">刷新</button>
+        <button class="btn btn-accent" data-close="1">关闭</button>
+      </div>
+    </div>`;
+  root.classList.add('show');
+  const close = () => root.classList.remove('show');
+  root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', close));
+  const renderLogs = async () => {
+    const box = $('#log-body');
+    if (!box) return;
+    try {
+      const r = await fetch('/api/logs');
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      const items = (j.logs || []).slice().reverse();
+      box.innerHTML = items.length
+        ? items.map(l => `<div class="log-line"><span class="log-t">${esc(fmtLogTime(l.t))}</span><span class="log-u">${esc(l.u || '')}</span><span class="log-m">${esc(l.m)}</span></div>`).join('')
+        : '<div class="empty">暂无日志</div>';
+    } catch (e) {
+      box.innerHTML = errorBox('加载日志失败：' + e.message);
+    }
+  };
+  renderLogs();
+  const rf = $('#log-refresh');
+  if (rf) rf.addEventListener('click', renderLogs);
+}
+function openFeedbackModal() {
+  const root = $('#modal-root');
+  const mail = 'littlebird@ancy.eu.org';
+  root.innerHTML = `
+    <div class="modal-mask" data-close="1"></div>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>反馈</h3>
+      <div class="msg">
+        问题或建议，欢迎发送邮件至：<br>
+        <b style="font-family:var(--mono);font-size:14px">${mail}</b><br><br>
+        点击下方按钮复制邮箱，或直接打开邮件客户端写信。
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" data-close="1">关闭</button>
+        <button class="btn" id="fb-copy" type="button">复制邮箱</button>
+        <a class="btn btn-accent" href="mailto:${mail}" target="_blank" rel="noopener">写邮件</a>
+      </div>
+    </div>`;
+  root.classList.add('show');
+  const close = () => root.classList.remove('show');
+  root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', close));
+  const cp = $('#fb-copy');
+  if (cp) cp.addEventListener('click', async () => { await copyText(mail); toast('邮箱已复制', 'ok'); });
 }
 function errorBox(msg) { return `<div class="error-box">${ICONS.err}<div>${esc(msg)}</div></div>`; }
 
@@ -1471,13 +1546,16 @@ function renderCreateView() {
       </div>
     </div>
 
-    ${(cfgC.accounts || []).length > 1 ? `
+    ${(cfgC.accounts || []).length > 0 ? `
     <div class="notice" style="max-width:760px">
-      <b>创建账号：${esc(cfgC.active || '')}</b>（AK …${esc(cfgC.accessKeyIdTail || '')}）—— 新开的机器将属于该账号。如需用其他账号创建，先到「实例」页顶部切换当前操作账号。
-    </div>` : (cfgC.configured ? `
-    <div class="notice" style="max-width:760px">
-      <b>创建账号：${esc(cfgC.active || '')}</b>（AK …${esc(cfgC.accessKeyIdTail || '')}）
-    </div>` : '')}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b>创建账号：</b>
+        <select class="input" id="create-account" style="width:auto;min-width:220px">
+          ${(cfgC.accounts || []).map(a => `<option value="${esc(a.name)}" ${a.name === cfgC.active ? 'selected' : ''}>${esc(a.name)}${a.region ? ' · ' + esc(a.region) : ''}（AK …${esc(a.accessKeyIdTail || '')}）</option>`).join('')}
+        </select>
+      </div>
+      <div class="hint">新开的机器将属于所选账号；可在「设置」页添加 / 管理凭证。</div>
+    </div>` : ''}
 
     <div class="form-card">
       <div class="form-grid">
@@ -1639,6 +1717,8 @@ function bindPickCards(type) {
 
 async function onCreateInstances() {
   const region = $('#create-submit').dataset.region;
+  const accountSel = $('#create-account');
+  const group = accountSel ? accountSel.value : undefined;
   const selBlueprint = $('#create-blueprints') ? $('#create-blueprints').querySelector('.pick-card.selected') : null;
   const selBundle = $('#create-bundles') ? $('#create-bundles').querySelector('.pick-card.selected') : null;
   if (!selBlueprint || !selBundle) { toast('请先选择系统和套餐', 'err'); return; }
@@ -1657,7 +1737,7 @@ async function onCreateInstances() {
   const bd = (meta.bundles || []).find(b => b.bundleId === bundleId);
   confirmDialog({
     title: '确认创建实例',
-    message: `将在区域 <b>${esc(region)}</b> 创建 <b>${names.length}</b> 台实例：<b>${esc(names.join('、'))}</b><br>系统：<b>${esc(bp ? blueprintLabel(bp) : blueprintId)}</b>　套餐：<b>${esc(bd ? (bd.name || bundleId) : bundleId)}</b>${bd && bd.price != null ? '（$' + Number(bd.price).toFixed(2) + '/月）' : ''}<br>创建后立即按用量计费，确定继续？`,
+    message: `将使用账号 <b>${esc(group || (getCreds() || {}).active || '未选择')}</b> 在区域 <b>${esc(region)}</b> 创建 <b>${names.length}</b> 台实例：<b>${esc(names.join('、'))}</b><br>系统：<b>${esc(bp ? blueprintLabel(bp) : blueprintId)}</b>　套餐：<b>${esc(bd ? (bd.name || bundleId) : bundleId)}</b>${bd && bd.price != null ? '（$' + Number(bd.price).toFixed(2) + '/月）' : ''}<br>创建后立即按用量计费，确定继续？`,
     confirmText: '创建',
     onConfirm: async () => {
       try {
@@ -1668,7 +1748,7 @@ async function onCreateInstances() {
           bundleId,
           keyPairName: keyName || undefined,
           userData: userData || undefined
-        }, region));
+        }, region, group));
         names.forEach(n => saveScript(n, userData));
         toast('创建请求已提交：' + names.join('、'), 'ok');
         setTimeout(() => render(), 800);
@@ -1731,19 +1811,19 @@ async function renderSettings() {
     <div class="form-card" style="max-width:640px">
       <h3>AWS 凭证（支持多个账号）</h3>
       <div class="field full" style="margin-bottom:12px">
-        <label>当前凭证组</label>
+        <label>当前凭证</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select class="input" id="set-group" style="flex:1;min-width:180px">
             ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.region ? ' · ' + esc(g.region) : ''}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
           </select>
-          <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建组</button>
-          ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前组</button>' : ''}
+          <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建凭证</button>
+          ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前凭证</button>' : ''}
         </div>
-        <div class="tip" style="margin-top:6px">切换下拉即切换当前使用的 AWS 账号；每组凭证独立保存。编辑已有组时 AK/SK 留空 = 保持不变。</div>
+        <div class="tip" style="margin-top:6px">切换下拉即切换当前使用的 AWS 账号；每个凭证独立保存。编辑已有凭证时 AK/SK 留空 = 保持不变。</div>
       </div>
       <div class="form-grid">
         <div class="field full">
-          <label>凭证组名称 <span class="tip">（填新名字保存 = 新建一组；与现有组同名 = 更新该组）</span></label>
+          <label>凭证名称 <span class="tip">（填新名字保存 = 新建一个凭证；与现有凭证同名 = 更新该凭证）</span></label>
           <input class="input" id="set-name" value="${esc(c.active || '')}" placeholder="如：美西-A、公司生产" autocomplete="off" spellcheck="false">
         </div>
         <div class="field full">
@@ -1877,7 +1957,7 @@ async function renderSettings() {
       $('#set-ak').value = '';
       $('#set-sk').value = '';
       $('#set-name').focus();
-      toast('填写新组名和凭证后保存，即新建一组', 'ok');
+      toast('填写新凭证名和凭证后保存，即新建一个凭证', 'ok');
     });
   }
   const grpDel = $('#set-group-del');
@@ -1885,14 +1965,14 @@ async function renderSettings() {
     grpDel.addEventListener('click', () => {
       const name = (getCreds() || {}).active || '';
       confirmDialog({
-        title: '删除凭证组',
-        message: '确定删除凭证组「' + name + '」吗？删除后不可恢复。',
+        title: '删除凭证',
+        message: '确定删除当前凭证「' + name + '」吗？删除后不可恢复。',
         confirmText: '删除',
         danger: true,
         onConfirm: async () => {
           try {
             await deleteAwsGroup(name);
-            toast('已删除凭证组', 'ok');
+            toast('已删除当前凭证', 'ok');
           } catch (e) { toast('删除失败：' + e.message, 'err'); }
           renderSettings();
           loadInstances();
@@ -2306,6 +2386,8 @@ document.addEventListener('click', (e) => {
   else if (action === 'save-all-ports') doSaveAllPorts(name, region, group);
 });
 
+$('#btn-logs').addEventListener('click', openLogsModal);
+$('#btn-feedback').addEventListener('click', openFeedbackModal);
 $('#btn-refresh').addEventListener('click', () => render());
 $('#btn-test-conn').addEventListener('click', async () => {
   const cfg = getCreds();
@@ -2713,19 +2795,19 @@ window.OciPanel = (function () {
     $q('#oci-key-file').value = '';
     $q('#oci-key-content').value = '';
     $q('#oci-group-name').focus();
-    ociToast('填写新组名和凭证后保存，即新建一组');
+    ociToast('填写新凭证名和凭证后保存，即新建一个凭证');
   });
   $q('#oci-group-del').addEventListener('click', function () {
     var name = grpSel.value;
     confirmDialog({
-      title: '删除凭证组',
-      message: '确定删除凭证组「' + name + '」吗？删除后不可恢复。',
+      title: '删除凭证',
+      message: '确定删除当前凭证「' + name + '」吗？删除后不可恢复。',
       confirmText: '删除',
       danger: true,
       onConfirm: async function () {
         try {
           await api('/config', { method: 'POST', body: JSON.stringify({ action: 'delete', name: name }) });
-          ociToast('已删除凭证组');
+          ociToast('已删除当前凭证');
         } catch (e) { ociToast(e.message, true); }
         loadSettings();
         loadInstances(true);

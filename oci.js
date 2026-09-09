@@ -435,7 +435,7 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
       try {
         if (payload.action === 'save') {
           name = String(payload.name || '').trim();
-          if (!name) return sendJson(res, 400, { error: '凭证组名称不能为空' });
+          if (!name) return sendJson(res, 400, { error: '凭证名称不能为空' });
           const existing = loadOciStore() || { active: '', accounts: {} };
           const prev = existing.accounts[name] || {};
           const cfg = {
