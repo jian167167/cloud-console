@@ -458,54 +458,56 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ---- 数据备份：导出全部账号与凭证（含电报配置）----
+  // ---- 数据备份：仅导出当前账号自己的配置（AWS 光帆 / 甲骨文 / 电报）----
   if (req.method === 'GET' && urlPath0 === '/api/backup') {
     const users = loadUsers();
-    const accounts = {};
-    for (const u of Object.keys(users)) {
-      const dir = userDir(u);
-      const acc = {};
-      const awsFile = path.join(dir, 'aws-credentials.json');
-      const ociFile = path.join(dir, 'oci-credentials.json');
-      const tgFile = path.join(dir, 'telegram.json');
-      if (fs.existsSync(awsFile)) { try { acc.aws = readJsonFile(awsFile, null); } catch (e) { acc.aws = null; } }
-      if (fs.existsSync(ociFile)) { try { acc.oci = readJsonFile(ociFile, null); } catch (e) { acc.oci = null; } }
-      if (fs.existsSync(tgFile)) { try { acc.telegram = readJsonFile(tgFile, null); } catch (e) { acc.telegram = null; } }
-      accounts[u] = acc;
-    }
-    opLog(req.user, '导出数据备份');
+    const u = req.user;
+    const dir = userDir(u);
+    const acc = {};
+    const awsFile = path.join(dir, 'aws-credentials.json');
+    const ociFile = path.join(dir, 'oci-credentials.json');
+    const tgFile = path.join(dir, 'telegram.json');
+    if (fs.existsSync(awsFile)) { try { acc.aws = readJsonFile(awsFile, null); } catch (e) { acc.aws = null; } }
+    if (fs.existsSync(ociFile)) { try { acc.oci = readJsonFile(ociFile, null); } catch (e) { acc.oci = null; } }
+    if (fs.existsSync(tgFile)) { try { acc.telegram = readJsonFile(tgFile, null); } catch (e) { acc.telegram = null; } }
+    opLog(req.user, '导出数据备份（当前账号）');
     return sendJson(res, 200, {
       app: 'cloud-console',
       version: 1,
       exportedAt: new Date().toISOString(),
-      users,
-      accounts
+      user: u,
+      users: users[u] ? { [u]: users[u] } : {},
+      accounts: { [u]: acc }
     });
   }
 
-  // ---- 数据恢复：导入备份并覆盖当前配置 ----
+  // ---- 数据恢复：仅恢复当前账号自己的配置，校验备份归属 ----
   if (req.method === 'POST' && urlPath0 === '/api/backup/restore') {
     let raw = '';
     req.on('data', (chunk) => { raw += chunk; });
     req.on('end', () => {
       let body = null;
       try { body = JSON.parse(raw); } catch (e) { body = null; }
-      if (!body || body.app !== 'cloud-console' || !body.users || typeof body.users !== 'object') {
-        return sendJson(res, 400, { error: '不是有效的云服务器控制台备份文件（缺少 app / users 字段）' });
+      if (!body || body.app !== 'cloud-console' || !body.accounts || typeof body.accounts !== 'object') {
+        return sendJson(res, 400, { error: '不是有效的云服务器控制台备份文件（缺少 app / accounts 字段）' });
+      }
+      const u = req.user;
+      if (body.user && body.user !== u) {
+        return sendJson(res, 403, { error: '该备份属于账号「' + body.user + '」，当前登录的是「' + u + '」，不能导入' });
+      }
+      const acc = body.accounts[u];
+      if (!acc) {
+        return sendJson(res, 403, { error: '该备份中不包含当前账号「' + u + '」的配置，不能导入' });
       }
       try {
-        saveUsers(body.users);
-        const accounts = body.accounts || {};
-        for (const u of Object.keys(accounts)) {
-          const acc = accounts[u] || {};
-          const dir = userDir(u);
-          fs.mkdirSync(dir, { recursive: true });
-          if (acc.aws != null) writeJsonFile(path.join(dir, 'aws-credentials.json'), acc.aws);
-          if (acc.oci != null) writeJsonFile(path.join(dir, 'oci-credentials.json'), acc.oci);
-          if (acc.telegram != null) writeJsonFile(path.join(dir, 'telegram.json'), acc.telegram);
-        }
-        opLog(req.user, '恢复数据备份：' + Object.keys(body.users).length + ' 个账号');
-        return sendJson(res, 200, { ok: true, message: '恢复成功：' + Object.keys(body.users).length + ' 个账号、' + Object.keys(accounts).length + ' 组配置' });
+        const dir = userDir(u);
+        fs.mkdirSync(dir, { recursive: true });
+        let n = 0;
+        if (acc.aws != null) { writeJsonFile(path.join(dir, 'aws-credentials.json'), acc.aws); n++; }
+        if (acc.oci != null) { writeJsonFile(path.join(dir, 'oci-credentials.json'), acc.oci); n++; }
+        if (acc.telegram != null) { writeJsonFile(path.join(dir, 'telegram.json'), acc.telegram); n++; }
+        opLog(req.user, '恢复数据备份（当前账号）：' + n + ' 组配置');
+        return sendJson(res, 200, { ok: true, message: '恢复成功：当前账号 ' + n + ' 组配置（AWS/甲骨文/电报）' });
       } catch (e) {
         return sendJson(res, 500, { error: '恢复失败：' + e.message });
       }

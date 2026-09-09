@@ -826,7 +826,7 @@ var Auth = (function () {
       '<div class="modal" style="width:560px;max-width:94vw" role="dialog">' +
       '<h3>📦 数据备份 / 恢复</h3>' +
       '<div class="msg" style="margin-top:10px">' +
-      '<p style="margin:0 0 8px;font-size:13px;color:var(--text-2)">导出包含<b>全部</b>内容：登录账号、AWS 光帆凭证、甲骨文凭证、电报机器人配置。<b style="color:var(--warn)">备份文件等同账号密码，请妥善保管、切勿外传。</b>重装容器后导入即可全部恢复，无需重新配置。</p>' +
+      '<p style="margin:0 0 8px;font-size:13px;color:var(--text-2)">导出当前账号的<b>全部</b>配置：AWS 光帆凭证、甲骨文凭证、电报机器人。<b style="color:var(--warn)">备份文件等同账号密码，请妥善保管、切勿外传。</b>重装容器后登录同一账号导入即可恢复，无需重新配置。</p>' +
       '</div>' +
       '<div id="bk-result" style="min-height:18px;margin-top:8px;font-size:12.5px;color:var(--text-2)"></div>' +
       '<div class="actions">' +
@@ -931,7 +931,7 @@ function bindBackupCard(exportBtn, importBtn, fileInput, resultBox) {
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-      resultBox.textContent = '备份已导出：' + name + '（含全部账号、AWS/甲骨文凭证与电报配置，请妥善保管）';
+      resultBox.textContent = '备份已导出：' + name + '（当前账号：AWS/甲骨文凭证与电报配置，请妥善保管）';
       resultBox.style.color = '';
     } catch (e) {
       resultBox.textContent = '导出失败：' + e.message;
