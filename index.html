@@ -818,14 +818,14 @@ function getConfigUrl() {
 async function callAWS(operation, params, region, group) {
   const cfg = getCreds();
   if (!cfg || !cfg.configured) {
-    throw new Error('尚未配置 AWS 凭证，请先进入「设置」填写 Access Key / Secret Key / 区域并保存到本机');
+    throw new Error('尚未配置 AWS 凭证，请先进入「设置」填写 Access Key / Secret Key 并保存到本机');
   }
   let res;
   try {
     res = await fetch(getProxyUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: operation, params: params || {}, region: region || cfg.region, group: group || undefined })
+      body: JSON.stringify({ action: operation, params: params || {}, region: region || '', group: group || undefined })
     });
   } catch (e) {
     throw new Error('无法连接本地代理。请确认已运行「启动面板.bat」（若已运行，检查 8080 端口是否被占用）');
@@ -934,7 +934,7 @@ async function deleteAwsGroup(name) {
 function readLegacyCreds() {
   try {
     const c = JSON.parse(localStorage.getItem(LS_CREDS));
-    if (c && c.accessKeyId && c.secretAccessKey && c.region) return c;
+    if (c && c.accessKeyId && c.secretAccessKey) return c;
   } catch (e) { /* noop */ }
   return null;
 }
@@ -945,15 +945,14 @@ function saveScript(instanceName, text) { const all = getScripts(); all[instance
 function updateCredsBadge() {
   const c = getCreds();
   const el = $('#creds-status'), label = $('#creds-label'), region = $('#region-chip');
-  if (c && c.configured && c.region) {
+  if (c && c.configured) {
     el.classList.add('ok');
-    label.textContent = '凭证已配置 · ' + c.region;
-    region.textContent = '全球视图 · 主区域 ' + c.region;
+    label.textContent = '凭证已配置';
   } else {
     el.classList.remove('ok');
     label.textContent = '凭证未配置';
-    region.textContent = '区域：--';
   }
+  region.textContent = '全球视图';
 }
 
 /* ============================================================
@@ -1123,7 +1122,7 @@ const REGIONS = [
    视图：实例列表（跨区域）
    ============================================================ */
 async function getEnabledRegions(group) {
-  const data = await callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }, undefined, group);
+  const data = await callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }, 'us-east-1', group);
   return (data.regions || []).map(r => r.name).filter(Boolean);
 }
 
@@ -1143,7 +1142,7 @@ async function loadAllInstances() {
       const results = await Promise.all(regions.map(async (region) => {
         try {
           const data = await callAWS('GetInstances', {}, region, g.name);
-          return (data.instances || []).map(i => Object.assign({}, i, { _region: region, _group: g.name }));
+          return (data.instances || []).map(i => Object.assign({}, i, { _region: region, _group: g.name }, 'us-east-1'));
         } catch (e) { return null; }
       }));
       groups.push({ name: g.name, region: g.region || '', akTail: g.accessKeyIdTail || '', instances: results.filter(Boolean).flat(), failed: results.filter(r => r === null).length });
@@ -1241,7 +1240,7 @@ async function renderInstances() {
       <div class="grp-block">
         <div class="grp-head">
           <span class="grp-name">☁ ${esc(g.name)}</span>
-          <span class="grp-meta">${esc(g.region || '')} · AK …${esc(g.akTail || '')}</span>
+          <span class="grp-meta">AK …${esc(g.akTail || '')}</span>
           <span class="count-badge">${g.instances.length} 台</span>
           ${g.failed ? `<span class="grp-warn">有 ${g.failed} 个区域读取失败</span>` : ''}
         </div>
@@ -1536,7 +1535,7 @@ function renderCreateView() {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <b>创建账号：</b>
         <select class="input" id="create-account" style="width:auto;min-width:220px">
-          ${(cfgC.accounts || []).map(a => `<option value="${esc(a.name)}" ${a.name === cfgC.active ? 'selected' : ''}>${esc(a.name)}${a.region ? ' · ' + esc(a.region) : ''}（AK …${esc(a.accessKeyIdTail || '')}）</option>`).join('')}
+          ${(cfgC.accounts || []).map(a => `<option value="${esc(a.name)}" ${a.name === cfgC.active ? 'selected' : ''}>${esc(a.name)}（AK …${esc(a.accessKeyIdTail || '')}）</option>`).join('')}
         </select>
       </div>
       <div class="hint">新开的机器将属于所选账号；可在「设置」页添加 / 管理凭证。</div>
@@ -1696,7 +1695,7 @@ function bindPickCards(type) {
     card.addEventListener('click', () => {
       container.querySelectorAll('.pick-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
-    });
+    }, 'us-east-1');
   });
 }
 
@@ -1780,7 +1779,7 @@ async function renderSettings() {
 
     ${c.configured ? `
       <div class="notice" style="max-width:640px">
-        当前凭证组：<b>${esc(c.active || '')}</b> · AK 尾号 <b>…${esc(c.accessKeyIdTail || '')}</b> · 区域 <b>${esc(c.region || '')}</b>
+        当前凭证组：<b>${esc(c.active || '')}</b> · AK 尾号 <b>…${esc(c.accessKeyIdTail || '')}</b>
       </div>` : ''}
 
     ${legacy ? `
@@ -1799,7 +1798,7 @@ async function renderSettings() {
         <label>当前凭证</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select class="input" id="set-group" style="flex:1;min-width:180px">
-            ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.region ? ' · ' + esc(g.region) : ''}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
+            ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
           </select>
           <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建凭证</button>
           ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前凭证</button>' : ''}
@@ -1821,12 +1820,6 @@ async function renderSettings() {
             <input class="input mono" id="set-sk" type="password" placeholder="••••••••" autocomplete="off" spellcheck="false" style="flex:1">
             <button class="btn btn-ghost" id="set-sk-toggle" type="button" title="显示 / 隐藏">显示</button>
           </div>
-        </div>
-        <div class="field full">
-          <label>主区域（Region，用于测试连接；实例列表自动覆盖所有区域）</label>
-          <select class="input" id="set-region">
-            ${REGIONS.map(r => `<option value="${r}" ${c.region === r ? 'selected' : ''}>${r}</option>`).join('')}
-          </select>
         </div>
       </div>
       <div class="form-actions">
@@ -1873,7 +1866,6 @@ async function renderSettings() {
     const name = $('#set-name').value.trim();
     const ak = $('#set-ak').value.trim();
     const sk = $('#set-sk').value.trim();
-    const region = $('#set-region').value;
     if (!name) { toast('请填写凭证组名称', 'err'); return; }
     const cur = getCreds() || {};
     const isNew = !(cur.accounts || []).some(g => g.name === name);
@@ -1881,7 +1873,7 @@ async function renderSettings() {
     const box = $('#set-result');
     box.innerHTML = `<div class="empty" style="padding:20px"><div class="spinner" style="margin:0 auto"></div></div>`;
     try {
-      await saveCredsToServer({ action: 'save', name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: true });
+      await saveCredsToServer({ action: 'save', name, accessKeyId: ak, secretAccessKey: sk, makeActive: true });
     } catch (e) {
       box.innerHTML = errorBox('保存失败：' + e.message);
       toast('保存失败', 'err');
@@ -1889,7 +1881,7 @@ async function renderSettings() {
     }
     if (test) {
       try {
-        await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }));
+        await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }, 'us-east-1'));
         box.innerHTML = `<div class="notice" style="margin:0">已保存到本机文件，连接成功：凭证有效，可以管理所有区域的 Lightsail 实例。</div>`;
         toast('凭证有效，连接成功', 'ok');
       } catch (e) {
@@ -2337,7 +2329,7 @@ async function render() {
   updateCredsBadge();
 
   if (path === 'instances') await renderInstances();
-  else if (path === 'instance') await renderInstanceDetail(params.get('name'), params.get('region') || (getCreds() && getCreds().region), params.get('group') || '');
+  else if (path === 'instance') await renderInstanceDetail(params.get('name'), params.get('region'), params.get('group') || '');
   else if (path === 'create') await renderCreate();
   else if (path === 'settings') await renderSettings();
   else location.hash = '#/instances';
@@ -2356,7 +2348,7 @@ document.addEventListener('click', (e) => {
   if (!trigger) return;
   const { action, name, region, group, idx } = trigger.dataset;
   if (action === 'open-instance') {
-    location.hash = '#/instance?name=' + encodeURIComponent(name) + '&region=' + encodeURIComponent(region || (getCreds() && getCreds().region)) + '&group=' + encodeURIComponent(group || '');
+    location.hash = '#/instance?name=' + encodeURIComponent(name) + '&region=' + encodeURIComponent(region || '') + '&group=' + encodeURIComponent(group || '');
   }
   else if (action === 'ssh') openSSH(name, region, group);
   else if (action === 'start' || action === 'stop' || action === 'reboot') doPowerAction(action, name, region, group);
@@ -2379,7 +2371,7 @@ $('#btn-test-conn').addEventListener('click', async () => {
   const cfg = getCreds();
   if (!cfg || !cfg.configured) { toast('请先配置凭证', 'warn'); location.hash = '#/settings'; return; }
   try {
-    await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }));
+    await withBusy(() => callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }, 'us-east-1'));
     toast('连接成功：凭证有效', 'ok');
   } catch (e) { toast('连接失败：' + e.message, 'err'); }
 });

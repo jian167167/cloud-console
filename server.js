@@ -152,7 +152,7 @@ function loadCredStore(user) {
       if (!c.active) c.active = Object.keys(c.accounts)[0] || '';
       return c;
     }
-    if (c && c.accessKeyId && c.secretAccessKey && c.region) {
+    if (c && c.accessKeyId && c.secretAccessKey) {
       const n = { active: 'default', accounts: { default: { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, region: c.region } } };
       try { fs.writeFileSync(userAwsFile(user), JSON.stringify(n, null, 2), { encoding: 'utf8', mode: 0o600 }); } catch (e) { /* noop */ }
       return n;
@@ -169,7 +169,7 @@ function loadCredentials(user) {
   const s = loadCredStore(user);
   if (!s) return null;
   const c = s.accounts[s.active] || s.accounts[Object.keys(s.accounts)[0]] || null;
-  if (!c || !(c.accessKeyId && c.secretAccessKey && c.region)) return null;
+  if (!c || !(c.accessKeyId && c.secretAccessKey)) return null;
   return Object.assign({ name: s.active || Object.keys(s.accounts)[0] }, c);
 }
 /** 按组名取凭证（实例分组用；组不存在则回退 active） */
@@ -178,7 +178,7 @@ function loadCredentialsForGroup(user, group) {
   if (!s) return null;
   const name = group && s.accounts[group] ? group : (s.accounts[s.active] ? s.active : Object.keys(s.accounts)[0]);
   const c = s.accounts[name] || null;
-  if (!c || !(c.accessKeyId && c.secretAccessKey && c.region)) return null;
+  if (!c || !(c.accessKeyId && c.secretAccessKey)) return null;
   return Object.assign({ name }, c);
 }
 /** 凭证组列表（不回显 SK，AK 只回尾号） */
@@ -451,19 +451,18 @@ const server = http.createServer((req, res) => {
         const sk = payload.secretAccessKey !== undefined && String(payload.secretAccessKey).trim() ? String(payload.secretAccessKey).trim() : (prev.secretAccessKey || '');
         const region = payload.region !== undefined && String(payload.region).trim() ? String(payload.region).trim() : (prev.region || '');
         if (isNew && (!ak || !sk)) return sendJson(res, 400, { error: '新凭证组必须填写 Access Key 和 Secret Key' });
-        if (!region) return sendJson(res, 400, { error: '区域不能为空' });
         if (ak && !/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
-        if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
+        if (region && !/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
         saveCredential(req.user, { name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: payload.makeActive !== false });
-        opLog(req.user, (isNew ? '新建 AWS 凭证：' : '更新 AWS 凭证：') + name + '（' + region + '）');
+        opLog(req.user, (isNew ? '新建 AWS 凭证：' : '更新 AWS 凭证：') + name + (region ? '（' + region + '）' : ''));
         return sendJson(res, 200, { ok: true, active: name, accessKeyIdTail: ak ? ak.slice(-4) : (prev.accessKeyId ? String(prev.accessKeyId).slice(-4) : ''), region });
       }
       const ak = String(payload.accessKeyId || '').trim();
       const sk = String(payload.secretAccessKey || '').trim();
       const region = String(payload.region || '').trim();
-      if (!ak || !sk || !region) return sendJson(res, 400, { error: 'Access Key / Secret Key / 区域不能为空' });
+      if (!ak || !sk) return sendJson(res, 400, { error: 'Access Key / Secret Key 不能为空' });
       if (!/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
-      if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
+      if (region && !/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
       let name;
       try {
         // 兼容旧前端（无 action）：保存到当前生效组
@@ -495,7 +494,10 @@ const server = http.createServer((req, res) => {
       if (!creds) {
         return sendJson(res, 409, { error: '尚未配置 AWS 凭证：请先在「设置」页填写并保存' });
       }
-      const region = payload.region || creds.region;
+      const region = payload.region || creds.region || '';
+      if (!region) {
+        return sendJson(res, 400, { error: '缺少区域参数，请按 Ctrl+F5 强制刷新页面后重试' });
+      }
       if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) {
         return sendJson(res, 400, { error: '区域格式不正确' });
       }
