@@ -121,6 +121,80 @@ function migrateLegacyCreds(user) {
   } catch (e) { /* 迁移失败不阻塞注册 */ }
 }
 
+/* ---------------- 登录暴力破解防护（账号 + 来源 IP 双维度） ----------------
+ * 账号维度：同一账号连续失败 BF_ACCOUNT_LIMIT 次 → 锁该账号（防换 IP 爆破）
+ * IP 维度：同一来源 IP 对任意账号累计失败 BF_IP_LIMIT 次 → 锁该 IP（防批量扫号）
+ * 锁定时间：1 分钟 × 10^轮次 递增（1 分钟 → 10 分钟 → 100 分钟 → 1000 分钟封顶）
+ * 成功登录会同时重置账号与来源 IP 的计数，避免误伤正常使用。
+ */
+const BF_ACCOUNT_LIMIT = (function () { const v = parseInt(process.env.BF_ACCOUNT_LIMIT || '', 10); return isFinite(v) && v > 0 ? v : 5; })();
+const BF_IP_LIMIT = (function () { const v = parseInt(process.env.BF_IP_LIMIT || '', 10); return isFinite(v) && v > 0 ? v : 10; })();
+const BF_BASE_MS = (function () { const v = parseInt(process.env.BF_BASE_MS || '', 10); return isFinite(v) && v > 0 ? v : 60000; })();
+const BF_MAX_STRIKES = 4; // 1 分钟 → 10 分钟 → 100 分钟 → 1000 分钟（约 16.6 小时封顶档）
+const BF_FILE = path.join(DATA_DIR, 'bruteforce.json');
+const bfUsers = new Map();
+const bfIps = new Map();
+function bfSave() {
+  try {
+    const u = {}, i = {};
+    for (const [k, v] of bfUsers.entries()) u[k] = { fails: v.fails, lockUntil: v.lockUntil, strikes: v.strikes };
+    for (const [k, v] of bfIps.entries()) i[k] = { fails: v.fails, lockUntil: v.lockUntil, strikes: v.strikes };
+    fs.writeFileSync(BF_FILE, JSON.stringify({ users: u, ips: i }), { encoding: 'utf8', mode: 0o600 });
+  } catch (e) { /* noop */ }
+}
+function bfLoad() {
+  try {
+    const j = JSON.parse(fs.readFileSync(BF_FILE, 'utf8'));
+    if (j && typeof j === 'object') {
+      // 兼容旧版（直接是 {账号: 记录} 的账号维度格式）
+      const users = (j.users && typeof j.users === 'object') ? j.users : (j.ips ? {} : j);
+      const ips = (j.ips && typeof j.ips === 'object') ? j.ips : {};
+      for (const k of Object.keys(users)) {
+        const v = users[k] || {};
+        bfUsers.set(k, { fails: v.fails || 0, lockUntil: v.lockUntil || 0, strikes: v.strikes || 0 });
+      }
+      for (const k of Object.keys(ips)) {
+        const v = ips[k] || {};
+        bfIps.set(k, { fails: v.fails || 0, lockUntil: v.lockUntil || 0, strikes: v.strikes || 0 });
+      }
+    }
+  } catch (e) { /* noop */ }
+}
+/** 来源 IP（用真实 TCP 地址，防 X-Forwarded-For 伪造绕过） */
+function bfClientIp(req) {
+  return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '') || 'unknown';
+}
+/** 返回锁定状态；锁定期满自动解除并重置连续失败计数 */
+function bfCheckMap(map, key) {
+  const r = map.get(key);
+  if (!r) return { locked: false };
+  if (r.lockUntil && Date.now() < r.lockUntil) {
+    const sec = Math.ceil((r.lockUntil - Date.now()) / 1000);
+    return { locked: true, waitSec: sec, waitMin: Math.max(1, Math.ceil(sec / 60)) };
+  }
+  if (r.lockUntil && Date.now() >= r.lockUntil) {
+    r.lockUntil = 0;
+    r.fails = 0;
+    bfSave();
+  }
+  return { locked: false };
+}
+/** 记录一次失败；达到阈值触发锁定（时长 = 1 分钟 × 10^轮次） */
+function bfFailMap(map, key, limit) {
+  let r = map.get(key);
+  if (!r) { r = { fails: 0, lockUntil: 0, strikes: 0 }; map.set(key, r); }
+  r.fails = (r.fails || 0) + 1;
+  if (r.fails >= limit) {
+    const mult = Math.pow(10, Math.min(r.strikes || 0, BF_MAX_STRIKES));
+    r.lockUntil = Date.now() + BF_BASE_MS * mult;
+    r.strikes = (r.strikes || 0) + 1;
+    r.fails = 0;
+  }
+  bfSave();
+  return r;
+}
+function bfResetMap(map, key) { map.delete(key); bfSave(); }
+
 /* ---------------- 二次登录验证码（2FA，2 分钟有效） ---------------- */
 const OTP_TTL_MS = 2 * 60 * 1000;
 const otpStore = new Map();
@@ -145,6 +219,7 @@ function checkOtp(user, code) {
 }
 /** 首次部署自动创建默认账号（admin / admin123）；已有账号则不干预 */
 function ensureDefaultAdmin() {
+  bfLoad();
   const users = loadUsers();
   if (Object.keys(users).length === 0) {
     const salt = crypto.randomBytes(16).toString('hex');
@@ -388,9 +463,24 @@ const server = http.createServer((req, res) => {
       const password = String(payload.password || '');
       const users = loadUsers();
       const u = users[username];
+      // ---- 暴力破解防护（IP 维度 + 账号维度）----
+      const bfIp = bfCheckMap(bfIps, bfClientIp(req));
+      if (bfIp.locked) {
+        opLog(username, '登录被拒绝（来源 IP 已锁定，剩余约 ' + bfIp.waitMin + ' 分钟）');
+        return sendJson(res, 429, { error: '该来源 IP 因登录失败次数过多已临时锁定，请约 ' + bfIp.waitMin + ' 分钟后重试' });
+      }
+      const bfUser = bfCheckMap(bfUsers, username);
+      if (bfUser.locked) {
+        opLog(username, '登录被拒绝（账号已锁定，剩余约 ' + bfUser.waitMin + ' 分钟）');
+        return sendJson(res, 429, { error: '该账号因密码错误次数过多已临时锁定，请约 ' + bfUser.waitMin + ' 分钟后重试' });
+      }
       if (!u || !verifyPassword(password, u.salt, u.hash)) {
+        bfFailMap(bfUsers, username, BF_ACCOUNT_LIMIT);
+        bfFailMap(bfIps, bfClientIp(req), BF_IP_LIMIT);
         return sendJson(res, 401, { error: '账号或密码不正确' });
       }
+      bfResetMap(bfUsers, username);
+      bfResetMap(bfIps, bfClientIp(req));
       // ---- 二次登录验证码（2FA）：已开启则先发码，验证通过后才建立会话 ----
       if (tgNotify.load(username).otp_enabled) {
         const otp = issueOtp(username);
@@ -438,8 +528,18 @@ const server = http.createServer((req, res) => {
       const username = String(payload.username || '').trim();
       const users = loadUsers();
       if (!users[username]) return sendJson(res, 401, { error: '账号不存在' });
+      const bfIp2 = bfCheckMap(bfIps, bfClientIp(req));
+      if (bfIp2.locked) {
+        return sendJson(res, 429, { error: '该来源 IP 因登录失败次数过多已临时锁定，请约 ' + bfIp2.waitMin + ' 分钟后重试' });
+      }
+      const bfUser2 = bfCheckMap(bfUsers, username);
+      if (bfUser2.locked) {
+        return sendJson(res, 429, { error: '该账号因密码错误次数过多已临时锁定，请约 ' + bfUser2.waitMin + ' 分钟后重试' });
+      }
       const r = checkOtp(username, String(payload.code || ''));
-      if (!r.ok) return sendJson(res, 401, { error: r.error });
+      if (!r.ok) { bfFailMap(bfUsers, username, BF_ACCOUNT_LIMIT); return sendJson(res, 401, { error: r.error }); }
+      bfResetMap(bfUsers, username);
+      bfResetMap(bfIps, bfClientIp(req));
       const token = createSession(username);
       setSessionCookie(res, token);
       opLog(username, '登录（二次验证通过）');
