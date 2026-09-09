@@ -27,25 +27,16 @@ Windows 用户也可以直接双击：
 - `安装依赖.bat`（装一次）
 - `启动面板.bat`（每次启动，自动开浏览器）
 
-### 方式 B：Docker（推荐，路由器 / NAS / VPS）
+### 方式 B：Docker（推荐，路由器 / NAS / VPS）—— 一条命令搞定
 
 ```bash
-git clone https://github.com/jian167167/cloud-console.git
-cd cloud-console
-./install.sh          # 一键安装（检测 Docker → 启动容器 → 自动装依赖）
+git clone --depth 1 https://github.com/jian167167/cloud-console.git /tmp/cc-setup && sh /tmp/cc-setup/install.sh
 ```
 
-或手动：
-
-```bash
-cd docker
-docker compose up -d
-# 浏览器打开 http://<主机IP>:8088
-# 首次启动会自动安装依赖（约 1-2 分钟），之后秒起
-```
-
-- 数据（账号 / 凭证）保存在 `docker/data/`，升级代码不丢数据
-- 书签直达甲骨文：`http://<主机IP>:8088/#/oci`
+- 自动下载代码到 `/opt/cloud-console` → 检测 Docker → 启动容器 → 完成
+- **以后想更新**：再运行同一条命令即可（自动拉最新版并重启）
+- 浏览器打开 `http://<路由器IP>:8088`，甲骨文直达 `http://<路由器IP>:8088/#/oci`
+- 数据（账号 / 凭证）保存在 `/opt/cloud-console/docker/data/`，升级不丢数据
 
 ## 首次使用
 
