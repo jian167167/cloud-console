@@ -507,6 +507,7 @@ select.input { cursor: pointer; }
             <div class="form-actions">
               <button id="oci-btn-save" class="btn btn-accent">保存设置</button>
               <button id="oci-btn-test2" class="btn">测试连接</button>
+              <button id="oci-btn-clear" class="btn btn-danger">清除凭证</button>
             </div>
           </div>
         </div>
@@ -2463,6 +2464,23 @@ window.OciPanel = (function () {
     }
   }
   $q('#oci-btn-test2').addEventListener('click', testConnection);
+
+  $q('#oci-btn-clear').addEventListener('click', function () {
+    confirmDialog({
+      title: '清除 OCI 凭证',
+      message: '确定要清除服务器上保存的甲骨文 OCI 凭证吗？清除后需重新填写才能管理实例。',
+      confirmText: '清除',
+      danger: true,
+      onConfirm: async function () {
+        try {
+          await api('/config', { method: 'POST', body: JSON.stringify({ clear: true }) });
+          ociToast('OCI 凭证已清除');
+          await loadSettings();
+          loadInstances(true);
+        } catch (e) { ociToast(e.message, true); }
+      }
+    });
+  });
 
   $q('#oci-btn-compartments').addEventListener('click', async function () {
     try {
