@@ -720,7 +720,7 @@ var Auth = (function () {
   function tgApiUrl(path) { return (location.protocol === 'file:' ? 'http://localhost:8080' : '') + path; }
 
   function openTelegramModal() {
-    var root = $q('#modal-root');
+    var root = document.querySelector('#modal-root');
     root.innerHTML = '' +
       '<div class="modal-mask" data-close="1"></div>' +
       '<div class="modal" style="width:560px;max-width:94vw" role="dialog">' +
@@ -772,7 +772,7 @@ var Auth = (function () {
     root.querySelector('#tg-save-test').addEventListener('click', function () { doTgSave(true); });
   }
 
-  $q('#nav-telegram').addEventListener('click', openTelegramModal);
+  document.querySelector('#nav-telegram').addEventListener('click', openTelegramModal);
 
     el('btn-auth-login').addEventListener('click', login);
     el('btn-auth-register').addEventListener('click', register);
