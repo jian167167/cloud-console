@@ -538,7 +538,7 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
         }, cfg).then((r) => {
           const st = (r.json && r.json.lifecycleState) || '?';
           tgNotify.notify(req.user,
-            '☁️ 甲骨文 OCI · ' + tgActionLabel(action) + '通知\n区域：' + cfg.region + '\n实例：' + instId + '\n结果：成功（' + st + '）\n时间：' + tgNotify.fmtNow());
+            '☁️ 甲骨文 OCI · ' + tgActionLabel(action) + '通知\n区域：' + cfg.region + '\n实例：' + instId + '\n结果：成功（' + st + '）\n时间：' + tgNotify.fmtNow(), null, true);
           return sendJson(res, 200, { ok: true, action: action, state: st });
         }).catch((e) => sendJson(res, 200, { ok: false, message: '操作失败：' + e.message }));
       });
@@ -549,7 +549,7 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
       switchIp(cfg, instId).then((r) => {
         if (r && r.ok) {
           tgNotify.notify(req.user,
-            '🔄 甲骨文 OCI · 更换公网 IP 通知\n区域：' + cfg.region + '\n实例：' + instId + '\n旧 IP：' + (r.old_ip || '无') + '\n新 IP：' + (r.new_ip || '?') + '\n时间：' + tgNotify.fmtNow());
+            '🔄 甲骨文 OCI · 更换公网 IP 通知\n区域：' + cfg.region + '\n实例：' + instId + '\n旧 IP：' + (r.old_ip || '无') + '\n新 IP：' + (r.new_ip || '?') + '\n时间：' + tgNotify.fmtNow(), null, true);
         }
         return sendJson(res, 200, r);
       }).catch((e) => sendJson(res, 200, { ok: false, message: '更换 IP 失败：' + e.message }));
@@ -566,7 +566,7 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
           if (r && r.ok) {
             const p = (r.ports || []).map((x) => x.port + '/' + x.protocol).join(', ') || (data && data.ports ? JSON.stringify(data.ports) : '?');
             tgNotify.notify(req.user,
-              '🔓 甲骨文 OCI · 开放端口通知\n区域：' + cfg.region + '\n实例：' + instId + '\n端口：' + p + '\n时间：' + tgNotify.fmtNow());
+              '🔓 甲骨文 OCI · 开放端口通知\n区域：' + cfg.region + '\n实例：' + instId + '\n端口：' + p + '\n时间：' + tgNotify.fmtNow(), null, true);
           }
           return sendJson(res, 200, r);
         }).catch((e) => sendJson(res, 200, { ok: false, message: (e.kind === 'param' ? '参数错误：' : '开放端口失败：') + e.message }));

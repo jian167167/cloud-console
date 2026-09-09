@@ -2875,18 +2875,31 @@ window.OciPanel = (function () {
 
   function setBusy(id, val) { if (val) busyIds.add(id); else busyIds.delete(id); renderInstances(); }
 
-  async function doAction(id, action, label, group) {
-    setBusy(id, true);
-    try {
-      await api('/instances/' + encodeURIComponent(id) + '/action?group=' + encodeURIComponent(group || ''), { method: 'POST', body: JSON.stringify({ action: action }) });
-      ociToast('已触发' + label + '，正在生效…');
-      setTimeout(function () { loadInstances(true); }, 3000);
-    } catch (e) {
-      ociToast(e.message, true);
-      loadInstances(true);
-    } finally {
-      setBusy(id, false);
-    }
+  function doAction(id, action, label, group) {
+    var inst = instances.find(function (i) { return i.id === id; });
+    var nm = (inst && inst.display_name) || id;
+    var grp = (inst && inst._group) || group || '';
+    var isStop = (action === 'STOP' || action === 'SOFTSTOP');
+    var warn = isStop ? '<br><br><span style="color:var(--warn)">关机后该实例将无法访问，停机期间仍会收取存储费用。</span>' : '';
+    confirmDialog({
+      title: label + '实例',
+      message: '确定要' + label + '实例 <b>' + escO(nm) + '</b>（' + escO(grp) + '）吗？' + warn,
+      confirmText: label,
+      danger: isStop,
+      onConfirm: async function () {
+        setBusy(id, true);
+        try {
+          await api('/instances/' + encodeURIComponent(id) + '/action?group=' + encodeURIComponent(grp || ''), { method: 'POST', body: JSON.stringify({ action: action }) });
+          ociToast('已触发' + label + '，正在生效…', 'ok');
+          setTimeout(function () { loadInstances(true); }, 3000);
+        } catch (e) {
+          ociToast(e.message, true);
+          loadInstances(true);
+        } finally {
+          setBusy(id, false);
+        }
+      }
+    });
   }
 
   function doSwitchIp(id, inst) {
