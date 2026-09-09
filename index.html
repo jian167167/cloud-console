@@ -529,10 +529,6 @@ select.input { cursor: pointer; }
     <div class="view" id="view"><div class="empty"><div class="spinner" style="margin:0 auto"></div></div></div>
     <div class="oci-view" id="oci-view">
       <div class="oci-wrap">
-        <div class="oci-tabs">
-          <button class="ps-btn active" data-ocitab="instances" title="甲骨文实例列表">实例</button>
-          <button class="ps-btn" data-ocitab="settings" title="OCI API 设置">设置</button>
-        </div>
 
         <div id="oci-view-instances">
           <div class="oci-toolbar">
@@ -3176,15 +3172,6 @@ window.OciPanel = (function () {
   });
 
   /* ---------- 标签切换 / 自动刷新 ---------- */
-  $qa('.oci-tabs .ps-btn').forEach(function (b) {
-    b.addEventListener('click', function () {
-      $qa('.oci-tabs .ps-btn').forEach(function (x) { x.classList.toggle('active', x === b); });
-      var t = b.dataset.ocitab;
-      $q('#oci-view-instances').classList.toggle('hidden', t !== 'instances');
-      $q('#oci-view-settings').classList.toggle('hidden', t !== 'settings');
-      if (t === 'instances') loadInstances(true);
-    });
-  });
 
   function startTimer() {
     stopTimer();
