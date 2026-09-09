@@ -30,6 +30,14 @@ Windows 用户也可以直接双击：
 ### 方式 B：Docker（推荐，路由器 / NAS / VPS）
 
 ```bash
+git clone https://github.com/jian167167/cloud-console.git
+cd cloud-console
+./install.sh          # 一键安装（检测 Docker → 启动容器 → 自动装依赖）
+```
+
+或手动：
+
+```bash
 cd docker
 docker compose up -d
 # 浏览器打开 http://<主机IP>:8088
