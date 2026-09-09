@@ -16,6 +16,6 @@ services:
       - OCI_CREDS_FILE=/data/oci-credentials.json
       - SSH_PATH=/usr/bin/ssh
     command: >
-      sh -c "apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null 2>&1 || true;
-             [ -f /app/node_modules/.install-ok ] || (cd /app && npm install --omit=dev >/dev/null 2>&1 && touch /app/node_modules/.install-ok) || true;
+      sh -c "command -v ssh >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null 2>&1);
+             [ -f /app/node_modules/.install-ok ] || (cd /app && npm install --omit=dev >/dev/null 2>&1 && touch /app/node_modules/.install-ok);
              exec node /app/server.js"
