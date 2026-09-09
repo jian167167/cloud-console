@@ -706,7 +706,6 @@ var Auth = (function () {
         body: JSON.stringify({ username: u, password: p, clientIp: clientIp })
       });
       var d = await r.json().catch(function () { return {}; });
-      if (r.ok && d.ok) return afterLogin(d.user);
       if (r.ok && d.otp_required) {
         el('otp-wrap').style.display = '';
         el('otp-hint').textContent = d.message || '验证码已发送到您的电报，请查收';
@@ -714,6 +713,7 @@ var Auth = (function () {
         el('otp-code').focus();
         return;
       }
+      if (r.ok && d.ok) return afterLogin(d.user);
       authMsg(d.error || '登录失败');
     } catch (e) { authMsg('无法连接服务器：' + e.message); }
   }
