@@ -207,6 +207,7 @@ function ociRequest({ service, region, method, urlPath, body }, cfg, timeoutMs) 
         let json = null;
         try { json = JSON.parse(data); } catch (e) { /* 非 JSON 响应 */ }
         if (res.statusCode >= 400) {
+          console.error('[OCI] ' + method + ' ' + urlPath + ' -> ' + res.statusCode + ' ' + data.slice(0, 300).replace(/\s+/g, ' '));
           const msg = (json && (json.message || json.code)) ? (json.message || json.code) : data.slice(0, 300);
           const err = new Error('HTTP ' + res.statusCode + ': ' + msg);
           err.status = res.statusCode;
