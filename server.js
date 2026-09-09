@@ -745,7 +745,9 @@ function startSshViaExe({ host, port, username, privateKey, certKey, cols, rows 
   const certFile = path.join(tmpDir, 'id-cert.pub');
   const knownHosts = path.join(tmpDir, 'known_hosts');
   fs.writeFileSync(keyFile, privateKey + '\n');
+  try { fs.chmodSync(keyFile, 0o600); } catch (e) { /* Windows 不支持权限位时忽略 */ }
   fs.writeFileSync(certFile, certKey + '\n');
+  try { fs.chmodSync(certFile, 0o600); } catch (e) { /* noop */ }
   fs.writeFileSync(knownHosts, '');
 
   const sshPath = findSshExe();
