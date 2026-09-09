@@ -134,20 +134,86 @@ function isPublicApi(urlPath) {
   return urlPath === '/api/auth/register' || urlPath === '/api/auth/login' || urlPath === '/api/auth/me';
 }
 
-/* ---------------- 账号凭证存储（按账号隔离） ---------------- */
-function loadCredentials(user) {
+/* ---------------- 账号凭证存储（按账号隔离，支持多凭证组） ----------------
+ * 文件格式：{ "active": "组名", "accounts": { "组名": {accessKeyId, secretAccessKey, region} } }
+ * 兼容旧版单组格式：读到时自动升级为新格式（组名 default） */
+function loadCredStore(user) {
   try {
-    const raw = fs.readFileSync(userAwsFile(user), 'utf8');
-    const c = JSON.parse(raw);
-    if (c && c.accessKeyId && c.secretAccessKey && c.region) return c;
+    const c = JSON.parse(fs.readFileSync(userAwsFile(user), 'utf8'));
+    if (c && c.accounts && typeof c.accounts === 'object') {
+      if (!c.active) c.active = Object.keys(c.accounts)[0] || '';
+      return c;
+    }
+    if (c && c.accessKeyId && c.secretAccessKey && c.region) {
+      const n = { active: 'default', accounts: { default: { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, region: c.region } } };
+      try { fs.writeFileSync(userAwsFile(user), JSON.stringify(n, null, 2), { encoding: 'utf8', mode: 0o600 }); } catch (e) { /* noop */ }
+      return n;
+    }
     return null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
-function saveCredentials(user, c) {
+function saveCredStore(user, store) {
   fs.mkdirSync(path.dirname(userAwsFile(user)), { recursive: true });
-  fs.writeFileSync(userAwsFile(user), JSON.stringify(c, null, 2), { encoding: 'utf8', mode: 0o600 });
+  fs.writeFileSync(userAwsFile(user), JSON.stringify(store, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+/** 当前生效的凭证（active 组；active 无效时回退到第一组） */
+function loadCredentials(user) {
+  const s = loadCredStore(user);
+  if (!s) return null;
+  const c = s.accounts[s.active] || s.accounts[Object.keys(s.accounts)[0]] || null;
+  if (!c || !(c.accessKeyId && c.secretAccessKey && c.region)) return null;
+  return Object.assign({ name: s.active || Object.keys(s.accounts)[0] }, c);
+}
+/** 按组名取凭证（实例分组用；组不存在则回退 active） */
+function loadCredentialsForGroup(user, group) {
+  const s = loadCredStore(user);
+  if (!s) return null;
+  const name = group && s.accounts[group] ? group : (s.accounts[s.active] ? s.active : Object.keys(s.accounts)[0]);
+  const c = s.accounts[name] || null;
+  if (!c || !(c.accessKeyId && c.secretAccessKey && c.region)) return null;
+  return Object.assign({ name }, c);
+}
+/** 凭证组列表（不回显 SK，AK 只回尾号） */
+function listCredentials(user) {
+  const s = loadCredStore(user);
+  if (!s) return { active: '', accounts: [] };
+  const accounts = Object.keys(s.accounts).map((name) => {
+    const c = s.accounts[name] || {};
+    return { name, region: c.region || '', accessKeyIdTail: String(c.accessKeyId || '').slice(-4), hasSecret: !!c.secretAccessKey };
+  });
+  return { active: s.active || (accounts[0] ? accounts[0].name : ''), accounts };
+}
+function saveCredential(user, opts) {
+  const s = loadCredStore(user) || { active: '', accounts: {} };
+  const name = String(opts.name || '').trim();
+  if (!name) throw new Error('凭证组名称不能为空');
+  const prev = s.accounts[name] || {};
+  const merged = {
+    accessKeyId: opts.accessKeyId !== undefined && String(opts.accessKeyId).trim() ? String(opts.accessKeyId).trim() : (prev.accessKeyId || ''),
+    secretAccessKey: opts.secretAccessKey !== undefined && String(opts.secretAccessKey).trim() ? String(opts.secretAccessKey).trim() : (prev.secretAccessKey || ''),
+    region: opts.region !== undefined && String(opts.region).trim() ? String(opts.region).trim() : (prev.region || '')
+  };
+  if (!s.accounts[name]) { if (!s.active) s.active = name; }
+  s.accounts[name] = merged;
+  if (opts.makeActive) s.active = name;
+  saveCredStore(user, s);
+}
+function setActiveCredential(user, name) {
+  const s = loadCredStore(user);
+  if (!s || !s.accounts[name]) throw new Error('凭证组不存在：' + name);
+  s.active = name;
+  saveCredStore(user, s);
+}
+function deleteCredential(user, name) {
+  const s = loadCredStore(user);
+  if (!s) return;
+  delete s.accounts[name];
+  if (s.active === name) s.active = Object.keys(s.accounts)[0] || '';
+  if (Object.keys(s.accounts).length === 0) {
+    try { fs.rmSync(userAwsFile(user), { force: true }); } catch (e) { /* noop */ }
+  } else {
+    saveCredStore(user, s);
+  }
 }
 function clearCredentials(user) {
   try { fs.rmSync(userAwsFile(user), { force: true }); } catch (e) { /* noop */ }
@@ -318,16 +384,17 @@ const server = http.createServer((req, res) => {
     req.user = user;
   }
 
-  // ---- 查询账号凭证状态（不回显密钥，只返回是否已配置 + AK 尾号）----
+  // ---- 查询账号凭证状态（凭证组列表，不回显密钥）----
   if (req.method === 'GET' && urlPath0 === '/api/config') {
-    const c = loadCredentials(req.user);
-    if (c) {
-      return sendJson(res, 200, { configured: true, accessKeyIdTail: String(c.accessKeyId).slice(-4), region: c.region });
+    const info = listCredentials(req.user);
+    if (info.accounts.length) {
+      const cur = loadCredentials(req.user) || {};
+      return sendJson(res, 200, { configured: true, active: info.active, accounts: info.accounts, accessKeyIdTail: cur.accessKeyId ? String(cur.accessKeyId).slice(-4) : '', region: cur.region || '' });
     }
-    return sendJson(res, 200, { configured: false, accessKeyIdTail: '', region: '' });
+    return sendJson(res, 200, { configured: false, active: '', accounts: [] });
   }
 
-  // ---- 保存 / 清除账号凭证 ----
+  // ---- 保存 / 删除 / 切换凭证组 ----
   if (req.method === 'POST' && urlPath0 === '/api/config') {
     let raw = '';
     req.on('data', (chunk) => { raw += chunk; });
@@ -338,14 +405,47 @@ const server = http.createServer((req, res) => {
         clearCredentials(req.user);
         return sendJson(res, 200, { ok: true });
       }
+      if (payload.action === 'set-active') {
+        try {
+          const name = String(payload.name || '').trim();
+          setActiveCredential(req.user, name);
+          return sendJson(res, 200, { ok: true, active: name });
+        } catch (e) { return sendJson(res, 400, { error: e.message }); }
+      }
+      if (payload.action === 'delete') {
+        deleteCredential(req.user, String(payload.name || '').trim());
+        return sendJson(res, 200, { ok: true });
+      }
+      if (payload.action === 'save') {
+        const name = String(payload.name || '').trim();
+        if (!name) return sendJson(res, 400, { error: '凭证组名称不能为空' });
+        const store = loadCredStore(req.user) || { active: '', accounts: {} };
+        const isNew = !store.accounts[name];
+        const prev = store.accounts[name] || {};
+        const ak = payload.accessKeyId !== undefined && String(payload.accessKeyId).trim() ? String(payload.accessKeyId).trim() : (prev.accessKeyId || '');
+        const sk = payload.secretAccessKey !== undefined && String(payload.secretAccessKey).trim() ? String(payload.secretAccessKey).trim() : (prev.secretAccessKey || '');
+        const region = payload.region !== undefined && String(payload.region).trim() ? String(payload.region).trim() : (prev.region || '');
+        if (isNew && (!ak || !sk)) return sendJson(res, 400, { error: '新凭证组必须填写 Access Key 和 Secret Key' });
+        if (!region) return sendJson(res, 400, { error: '区域不能为空' });
+        if (ak && !/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
+        if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
+        saveCredential(req.user, { name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: payload.makeActive !== false });
+        return sendJson(res, 200, { ok: true, active: name, accessKeyIdTail: ak ? ak.slice(-4) : (prev.accessKeyId ? String(prev.accessKeyId).slice(-4) : ''), region });
+      }
       const ak = String(payload.accessKeyId || '').trim();
       const sk = String(payload.secretAccessKey || '').trim();
       const region = String(payload.region || '').trim();
       if (!ak || !sk || !region) return sendJson(res, 400, { error: 'Access Key / Secret Key / 区域不能为空' });
       if (!/^[A-Z0-9]{16,32}$/i.test(ak)) return sendJson(res, 400, { error: 'Access Key ID 格式不正确' });
       if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return sendJson(res, 400, { error: '区域格式不正确' });
-      saveCredentials(req.user, { accessKeyId: ak, secretAccessKey: sk, region });
-      return sendJson(res, 200, { ok: true, accessKeyIdTail: ak.slice(-4), region });
+      let name;
+      try {
+        // 兼容旧前端（无 action）：保存到当前生效组
+        const cur = loadCredentials(req.user);
+        name = cur && cur.name ? cur.name : 'default';
+        saveCredential(req.user, { name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: true });
+        return sendJson(res, 200, { ok: true, active: name, accessKeyIdTail: ak.slice(-4), region });
+      } catch (e) { return sendJson(res, 400, { error: e.message }); }
     });
     return;
   }
@@ -365,7 +465,7 @@ const server = http.createServer((req, res) => {
       if (!payload.action) {
         return sendJson(res, 400, { error: '前端版本过旧，请按 Ctrl+F5 强制刷新浏览器后重试' });
       }
-      const creds = loadCredentials(req.user);
+      const creds = payload.group ? loadCredentialsForGroup(req.user, String(payload.group)) : loadCredentials(req.user);
       if (!creds) {
         return sendJson(res, 409, { error: '尚未配置 AWS 凭证：请先在「设置」页填写并保存' });
       }

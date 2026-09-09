@@ -26,19 +26,85 @@ function setCredsFile(p) {
   if (p) OCI_CREDS_FILE = p;
 }
 
-/* ---------------- 凭证读写 ---------------- */
-
-function loadOciConfig() {
+/* ---------------- 凭证读写（支持多凭证组） ----------------
+ * 文件格式：{ "active": "组名", "accounts": { "组名": {tenancy_ocid,...} } }
+ * 兼容旧版单组格式：读到时自动升级（组名 default） */
+function loadOciStore() {
   try {
     const raw = fs.readFileSync(OCI_CREDS_FILE, 'utf8');
-    return JSON.parse(raw) || {};
+    const c = JSON.parse(raw) || {};
+    if (c.accounts && typeof c.accounts === 'object') {
+      if (!c.active) c.active = Object.keys(c.accounts)[0] || '';
+      return c;
+    }
+    if (c.tenancy_ocid || c.user_ocid || c.fingerprint) {
+      const n = { active: 'default', accounts: { default: c } };
+      try { fs.writeFileSync(OCI_CREDS_FILE, JSON.stringify(n, null, 2), { encoding: 'utf8', mode: 0o600 }); } catch (e) { /* noop */ }
+      return n;
+    }
+    return null;
   } catch (e) {
-    return {};
+    return null;
   }
 }
-
-function saveOciConfig(cfg) {
-  fs.writeFileSync(OCI_CREDS_FILE, JSON.stringify(cfg, null, 2), { encoding: 'utf8', mode: 0o600 });
+function saveOciStore(store) {
+  fs.mkdirSync(path.dirname(OCI_CREDS_FILE), { recursive: true });
+  fs.writeFileSync(OCI_CREDS_FILE, JSON.stringify(store, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+/** 按组名取 OCI 配置（实例分组用；组不存在回退 active） */
+function loadOciConfigForGroup(group) {
+  const s = loadOciStore();
+  if (!s) return {};
+  const keys = Object.keys(s.accounts);
+  const name = group && s.accounts[group] ? group : (s.accounts[s.active] ? s.active : keys[0]);
+  return s.accounts[name] || {};
+}
+/** 当前生效的 OCI 配置（active 组） */
+function loadOciConfig() {
+  return loadOciConfigForGroup('');
+}
+/** 凭证组列表（key_content 原文不回显，只回显是否有） */
+function listOciAccounts() {
+  const s = loadOciStore();
+  if (!s) return { active: '', accounts: [] };
+  const accounts = Object.keys(s.accounts).map((name) => {
+    const c = s.accounts[name] || {};
+    const safe = {};
+    for (const k of ['tenancy_ocid', 'user_ocid', 'fingerprint', 'region', 'compartment_ocid', 'key_file']) {
+      if (c[k]) safe[k] = c[k];
+    }
+    safe.name = name;
+    safe.has_key_content = !!String(c.key_content || '').trim();
+    return safe;
+  });
+  return { active: s.active || (accounts[0] ? accounts[0].name : ''), accounts };
+}
+function saveOciAccount(name, cfg, makeActive) {
+  const s = loadOciStore() || { active: '', accounts: {} };
+  if (!s.accounts[name]) { if (!s.active) s.active = name; }
+  s.accounts[name] = cfg;
+  if (makeActive) s.active = name;
+  saveOciStore(s);
+}
+function setActiveOciAccount(name) {
+  const s = loadOciStore();
+  if (!s || !s.accounts[name]) throw new Error('凭证组不存在：' + name);
+  s.active = name;
+  saveOciStore(s);
+}
+function deleteOciAccount(name) {
+  const s = loadOciStore();
+  if (!s) return;
+  delete s.accounts[name];
+  if (s.active === name) s.active = Object.keys(s.accounts)[0] || '';
+  if (Object.keys(s.accounts).length === 0) {
+    try { fs.rmSync(OCI_CREDS_FILE, { force: true }); } catch (e) { /* noop */ }
+  } else {
+    saveOciStore(s);
+  }
+}
+function clearOciCreds() {
+  try { fs.rmSync(OCI_CREDS_FILE, { force: true }); } catch (e) { /* noop */ }
 }
 
 /** 把保存的配置组装成可用配置（校验必填 + 解析私钥）。返回 {ok, cfg|error} */
@@ -330,13 +396,17 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
 
   // ---------- 凭证 ----------
   if (sub === 'config' && method === 'GET') {
-    const c = loadOciConfig();
-    const safe = {};
-    for (const k of ['tenancy_ocid', 'user_ocid', 'fingerprint', 'region', 'compartment_ocid', 'key_file']) {
-      if (c[k]) safe[k] = c[k];
+    const info = listOciAccounts();
+    if (info.accounts.length) {
+      const cur = loadOciConfig();
+      const safe = { configured: true, active: info.active, accounts: info.accounts };
+      for (const k of ['tenancy_ocid', 'user_ocid', 'fingerprint', 'region', 'compartment_ocid', 'key_file']) {
+        if (cur[k]) safe[k] = cur[k];
+      }
+      safe.has_key_content = !!String(cur.key_content || '').trim();
+      return sendJson(res, 200, safe);
     }
-    safe.has_key_content = !!String(c.key_content || '').trim();
-    return sendJson(res, 200, safe);
+    return sendJson(res, 200, { configured: false, active: '', accounts: [] });
   }
 
   if (sub === 'config' && method === 'POST') {
@@ -347,21 +417,57 @@ function handle(req, res, urlPath, method, sendJson, isAllowedHost) {
       let payload;
       try { payload = JSON.parse(raw); } catch (e) { return sendJson(res, 400, { error: '请求体不是合法 JSON' }); }
       if (payload.clear) {
-        try { fs.rmSync(OCI_CREDS_FILE, { force: true }); } catch (e) { /* noop */ }
+        clearOciCreds();
         return sendJson(res, 200, { ok: true });
       }
-      const cfg = loadOciConfig();
-      for (const k of ['tenancy_ocid', 'user_ocid', 'fingerprint', 'key_content', 'key_file', 'region', 'compartment_ocid']) {
-        if (payload[k] !== undefined) cfg[k] = String(payload[k] || '').trim();
+      if (payload.action === 'set-active') {
+        try {
+          const name = String(payload.name || '').trim();
+          setActiveOciAccount(name);
+          return sendJson(res, 200, { ok: true, active: name });
+        } catch (e) { return sendJson(res, 400, { error: e.message }); }
       }
-      saveOciConfig(cfg);
-      return sendJson(res, 200, { ok: true, message: '设置已保存' });
+      if (payload.action === 'delete') {
+        deleteOciAccount(String(payload.name || '').trim());
+        return sendJson(res, 200, { ok: true });
+      }
+      let name;
+      try {
+        if (payload.action === 'save') {
+          name = String(payload.name || '').trim();
+          if (!name) return sendJson(res, 400, { error: '凭证组名称不能为空' });
+          const existing = loadOciStore() || { active: '', accounts: {} };
+          const prev = existing.accounts[name] || {};
+          const cfg = {
+            tenancy_ocid: payload.tenancy_ocid !== undefined ? String(payload.tenancy_ocid || '').trim() : (prev.tenancy_ocid || ''),
+            user_ocid: payload.user_ocid !== undefined ? String(payload.user_ocid || '').trim() : (prev.user_ocid || ''),
+            fingerprint: payload.fingerprint !== undefined ? String(payload.fingerprint || '').trim() : (prev.fingerprint || ''),
+            region: payload.region !== undefined ? String(payload.region || '').trim() : (prev.region || ''),
+            compartment_ocid: payload.compartment_ocid !== undefined ? String(payload.compartment_ocid || '').trim() : (prev.compartment_ocid || ''),
+            key_file: payload.key_file !== undefined ? String(payload.key_file || '').trim() : (prev.key_file || ''),
+            key_content: payload.key_content !== undefined && String(payload.key_content).trim() ? String(payload.key_content).trim() : (prev.key_content || '')
+          };
+          saveOciAccount(name, cfg, payload.makeActive !== false);
+          return sendJson(res, 200, { ok: true, active: name, message: '设置已保存' });
+        }
+        // 兼容旧前端（无 action）：保存到当前生效组
+        const cur = loadOciConfig();
+        name = cur.name || 'default';
+        const cfg2 = {};
+        for (const k of ['tenancy_ocid', 'user_ocid', 'fingerprint', 'key_content', 'key_file', 'region', 'compartment_ocid']) {
+          if (payload[k] !== undefined) cfg2[k] = String(payload[k] || '').trim();
+        }
+        saveOciAccount(name, Object.assign({}, cur, cfg2), true);
+        return sendJson(res, 200, { ok: true, active: name, message: '设置已保存' });
+      } catch (e) { return sendJson(res, 400, { error: e.message }); }
     });
     return;
   }
 
-  // 以下接口需要已配置凭证
-  const built = buildOciConfig(loadOciConfig());
+  // 以下接口需要已配置凭证（支持 ?group=xxx 指定凭证组，实例分组用）
+  const urlObj = new URL(req.url, 'http://localhost');
+  const groupParam = urlObj.searchParams.get('group') || '';
+  const built = buildOciConfig(loadOciConfigForGroup(groupParam));
   if (!built.ok) {
     return sendJson(res, 409, { ok: false, message: '尚未配置 OCI 凭证：' + built.error });
   }

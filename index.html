@@ -125,6 +125,10 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .oci-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .oci-toolbar h2 { font-size: 15px; color: var(--text); }
 .oci-auto { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+.oci-grp-sep td { background: var(--surface); border-top: 1px solid var(--border); padding: 8px 12px !important; font-size: 12.5px; }
+.oci-grp-sep .oci-grp-name { font-weight: 700; color: var(--text); font-size: 13px; }
+.oci-grp-sep .oci-grp-meta { font-family: var(--mono); color: var(--text-3); }
+.oci-grp-empty td { text-align: center; color: var(--text-3); padding: 14px 12px !important; }
 .oci-tip { color: var(--text-3); font-size: 12.5px; line-height: 1.7; margin-bottom: 12px; }
 .oci-tip code, .oci-help code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .oci-help { margin: 12px 0 16px; border: 1px dashed var(--border-2); border-radius: 8px; padding: 10px 14px; }
@@ -189,6 +193,14 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 
 /* ---------------- 卡片 / 实例网格 ---------------- */
 .instance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+/* 凭证组分块 */
+.grp-block { margin-bottom: 26px; }
+.grp-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+.grp-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.grp-meta { font-size: 12px; color: var(--text-3); font-family: var(--mono); }
+.grp-warn { font-size: 12px; color: var(--warn); }
+.grp-block > .instance-grid { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); padding: 16px; }
+.grp-block > .empty.small { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); margin: 0; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .instance-card { position: relative; display: flex; flex-direction: column; gap: 12px; transition: border-color 0.15s, transform 0.15s; }
 .instance-card:hover { border-color: var(--border-2); }
@@ -449,8 +461,11 @@ select.input { cursor: pointer; }
 
         <div id="oci-view-instances">
           <div class="oci-toolbar">
-            <h2>实例列表</h2>
-            <label class="oci-auto"><input type="checkbox" id="oci-auto-refresh" checked> 自动刷新（5 秒）</label>
+            <h2>实例列表 <span id="oci-account-count" class="sub" style="font-size:12px;color:var(--text-3)"></span></h2>
+            <div style="display:flex;align-items:center;gap:10px">
+              <select class="input" id="oci-group-top" style="width:auto;min-width:150px;padding:4px 8px;display:none" title="切换当前甲骨文凭证组"></select>
+              <label class="oci-auto"><input type="checkbox" id="oci-auto-refresh" checked> 自动刷新（5 秒）</label>
+            </div>
           </div>
           <div class="table-wrap">
             <table class="table">
@@ -465,7 +480,20 @@ select.input { cursor: pointer; }
 
         <div id="oci-view-settings" class="hidden">
           <div class="form-card">
-            <h3>OCI API 设置</h3>
+            <h3>OCI API 设置（支持多个账号）</h3>
+            <div class="field full" style="margin-bottom:12px">
+              <label>当前凭证组</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <select class="input" id="oci-group" style="flex:1;min-width:180px"></select>
+                <button type="button" id="oci-group-new" class="btn btn-ghost">＋ 新建组</button>
+                <button type="button" id="oci-group-del" class="btn btn-danger" style="display:none">删除当前组</button>
+              </div>
+              <div class="oci-tip" style="margin-top:6px">切换下拉即切换当前使用的甲骨文账号；编辑已有组时私钥留空 = 保持不变。</div>
+            </div>
+            <div class="field full" style="margin-bottom:4px">
+                <label>凭证组名称 <span class="oci-tip">（填新名字保存 = 新建一组；与现有组同名 = 更新该组）</span></label>
+                <input id="oci-group-name" type="text" placeholder="如：甲骨文A、甲骨文B" autocomplete="off">
+              </div>
             <p class="oci-tip">填写 Oracle Cloud API 密钥信息（租户 OCID、用户 OCID、指纹、私钥、区域、分区）。凭证仅保存在服务器本地文件中，不会上传到任何地方。</p>
             <details class="oci-help">
               <summary>如何获取这些凭证？（点击展开）</summary>
@@ -774,7 +802,7 @@ function getConfigUrl() {
   return location.protocol === 'file:' ? 'http://localhost:8080/api/config' : '/api/config';
 }
 
-async function callAWS(operation, params, region) {
+async function callAWS(operation, params, region, group) {
   const cfg = getCreds();
   if (!cfg || !cfg.configured) {
     throw new Error('尚未配置 AWS 凭证，请先进入「设置」填写 Access Key / Secret Key / 区域并保存到本机');
@@ -784,7 +812,7 @@ async function callAWS(operation, params, region) {
     res = await fetch(getProxyUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: operation, params: params || {}, region: region || cfg.region })
+      body: JSON.stringify({ action: operation, params: params || {}, region: region || cfg.region, group: group || undefined })
     });
   } catch (e) {
     throw new Error('无法连接本地代理。请确认已运行「启动面板.bat」（若已运行，检查 8080 端口是否被占用）');
@@ -859,6 +887,28 @@ async function clearCredsOnServer() {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || ('清除失败（HTTP ' + r.status + '）'));
+  await loadAwsConfig();
+}
+/* 切换当前凭证组 */
+async function setAwsActiveGroup(name) {
+  const r = await fetch(getConfigUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'set-active', name })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('切换失败（HTTP ' + r.status + '）'));
+  await loadAwsConfig();
+}
+/* 删除凭证组 */
+async function deleteAwsGroup(name) {
+  const r = await fetch(getConfigUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', name })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('删除失败（HTTP ' + r.status + '）'));
   await loadAwsConfig();
 }
 /* 读取旧版 localStorage 中的凭证（用于一键迁移） */
@@ -962,10 +1012,12 @@ function parseHash() {
    状态
    ============================================================ */
 const state = {
-  instances: null,          // 跨区域实例列表（带 _region）
-  regions: [],              // 启用的区域列表
+  instances: null,          // 跨区域实例列表（带 _region / _group）
+  groups: null,             // 按凭证组分组的实例 [{name, region, akTail, instances, failed, error}]
+  regions: [],              // 启用的区域列表（默认凭证组）
+  regionsByGroup: {},       // 每组各自的启用区域
   metaByRegion: {},         // 每个区域的 {blueprints, bundles, keyPairs, availabilityZones}
-  detail: { name: null, region: null, ports: [], editingIdx: -1 }
+  detail: { name: null, region: null, group: null, ports: [], editingIdx: -1 }
 };
 
 function stateName(code) {
@@ -988,27 +1040,37 @@ const REGIONS = [
 /* ============================================================
    视图：实例列表（跨区域）
    ============================================================ */
-async function getEnabledRegions() {
-  const data = await callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false });
+async function getEnabledRegions(group) {
+  const data = await callAWS('GetRegions', { includeAvailabilityZones: false, includeRelationalDatabaseAvailabilityZones: false }, undefined, group);
   return (data.regions || []).map(r => r.name).filter(Boolean);
 }
 
+/** 按凭证组逐个拉取实例：每个组用自己的凭证，组间互不影响 */
 async function loadAllInstances() {
-  let regions = state.regions;
-  if (!regions.length) {
-    try { regions = await getEnabledRegions(); } catch (e) { /* 无权限时用默认列表 */ }
-    if (!regions.length) regions = REGIONS;
-    state.regions = regions;
-  }
-  const results = await Promise.all(regions.map(async (region) => {
+  const cfg = getCreds();
+  const accounts = (cfg && cfg.accounts) || [];
+  if (!accounts.length) return { groups: [], instances: [], regionsCount: 0, failed: 0 };
+  const groups = [];
+  for (const g of accounts) {
     try {
-      const data = await callAWS('GetInstances', {}, region);
-      return (data.instances || []).map(i => Object.assign({}, i, { _region: region }));
-    } catch (e) { return null; }
-  }));
-  const instances = results.filter(Boolean).flat();
-  const failed = results.filter(r => r === null).length;
-  return { instances, regions: regions.length, failed };
+      let regions = state.regionsByGroup[g.name];
+      if (!regions || !regions.length) {
+        try { regions = await getEnabledRegions(g.name); } catch (e) { regions = REGIONS; }
+        state.regionsByGroup[g.name] = regions;
+      }
+      const results = await Promise.all(regions.map(async (region) => {
+        try {
+          const data = await callAWS('GetInstances', {}, region, g.name);
+          return (data.instances || []).map(i => Object.assign({}, i, { _region: region, _group: g.name }));
+        } catch (e) { return null; }
+      }));
+      groups.push({ name: g.name, region: g.region || '', akTail: g.accessKeyIdTail || '', instances: results.filter(Boolean).flat(), failed: results.filter(r => r === null).length });
+    } catch (e) {
+      groups.push({ name: g.name, region: g.region || '', akTail: g.accessKeyIdTail || '', instances: [], failed: 1, error: e.message });
+    }
+  }
+  const instances = groups.reduce((a, g) => a.concat(g.instances), []);
+  return { groups, instances, regionsCount: Object.keys(state.regionsByGroup).length, failed: groups.reduce((a, g) => a + g.failed, 0) };
 }
 
 function instanceCard(inst) {
@@ -1060,12 +1122,12 @@ function instanceCard(inst) {
       已开放端口：${esc(portText)}
     </div>
     <div class="inst-actions">
-      <button class="btn btn-accent btn-sm" data-action="ssh" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStop ? '' : 'disabled'}>SSH</button>
-      <button class="btn btn-sm" data-action="start" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStart ? '' : 'disabled'}>开机</button>
-      <button class="btn btn-sm" data-action="stop" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canStop ? '' : 'disabled'}>关机</button>
-      <button class="btn btn-sm" data-action="reboot" data-name="${esc(inst.name)}" data-region="${esc(region)}" ${canReboot ? '' : 'disabled'}>重启</button>
-      <button class="btn btn-ghost btn-sm" data-action="open-instance" data-name="${esc(inst.name)}" data-region="${esc(region)}">详情</button>
-      <button class="btn btn-danger btn-sm" data-action="delete" data-name="${esc(inst.name)}" data-region="${esc(region)}">删除</button>
+      <button class="btn btn-accent btn-sm" data-action="ssh" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}" ${canStop ? '' : 'disabled'}>SSH</button>
+      <button class="btn btn-sm" data-action="start" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}" ${canStart ? '' : 'disabled'}>开机</button>
+      <button class="btn btn-sm" data-action="stop" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}" ${canStop ? '' : 'disabled'}>关机</button>
+      <button class="btn btn-sm" data-action="reboot" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}" ${canReboot ? '' : 'disabled'}>重启</button>
+      <button class="btn btn-ghost btn-sm" data-action="open-instance" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}">详情</button>
+      <button class="btn btn-danger btn-sm" data-action="delete" data-name="${esc(inst.name)}" data-region="${esc(region)}" data-group="${esc(inst._group || '')}">删除</button>
     </div>
   </article>`;
 }
@@ -1084,25 +1146,56 @@ async function renderInstances() {
   }
   view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
   try {
-    const { instances, regions, failed } = await withBusy(loadAllInstances);
+    const { groups, instances, failed } = await withBusy(loadAllInstances);
     state.instances = instances;
+    state.groups = groups;
     const counts = {};
     instances.forEach(i => { const s = (i.state && i.state.name) || 'unknown'; counts[s] = (counts[s] || 0) + 1; });
     const running = counts.running || 0;
     const instRegions = new Set(instances.map(i => i._region || (i.location && i.location.regionName) || '-'));
+    const cfgTop = getCreds() || {};
+    const grpOpts = (cfgTop.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === cfgTop.active ? 'selected' : ''}>${esc(g.name)}</option>`).join('');
+    const grpBlocks = groups.map(g => `
+      <div class="grp-block">
+        <div class="grp-head">
+          <span class="grp-name">☁ ${esc(g.name)}</span>
+          <span class="grp-meta">${esc(g.region || '')} · AK …${esc(g.akTail || '')}</span>
+          <span class="count-badge">${g.instances.length} 台</span>
+          ${g.failed ? `<span class="grp-warn">有 ${g.failed} 个区域读取失败</span>` : ''}
+        </div>
+        ${g.error
+          ? errorBox('读取该账号实例失败：' + g.error)
+          : (g.instances.length === 0
+            ? `<div class="empty small">该账号下还没有光帆实例</div>`
+            : `<div class="instance-grid">${g.instances.map(instanceCard).join('')}</div>`)}
+      </div>`).join('');
     view.innerHTML = `
       <div class="page-head">
         <div>
           <h1>实例</h1>
-          <div class="sub">跨 ${instRegions.size} 个区域 · 共 ${instances.length} 台 · ${running} 台运行中${failed ? `（有 ${failed} 个区域读取失败，可能无权限）` : ''}</div>
+          <div class="sub">${cfgTop.accounts ? cfgTop.accounts.length + ' 个账号' : '--'} · 跨 ${instRegions.size} 个区域 · 共 ${instances.length} 台 · ${running} 台运行中${failed ? `（有 ${failed} 个区域读取失败，可能无权限）` : ''}</div>
+          ${(cfgTop.accounts || []).length > 1 ? `
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+            <span class="sub">当前操作账号（创建实例用）</span>
+            <select class="input" id="aws-group-top" style="width:auto;min-width:150px;padding:4px 8px">${grpOpts}</select>
+          </div>` : ''}
         </div>
         <div class="page-actions">
           <span class="count-badge">${instances.length} 台实例</span>
         </div>
       </div>
-      ${instances.length === 0
-        ? `<div class="empty">${ICONS.info}<div class="title">所有区域都没有光帆实例</div><div class="desc">可以在「创建实例」中选区域、系统、月租套餐新开机器。</div></div>`
-        : `<div class="instance-grid">${instances.map(instanceCard).join('')}</div>`}`;
+      ${groups.length === 0
+        ? `<div class="empty">${ICONS.info}<div class="title">还没有配置 AWS 凭证</div><div class="desc">可以在「设置」中添加 AWS 账号。</div></div>`
+        : grpBlocks}`;
+    const grpTop = $('#aws-group-top');
+    if (grpTop) {
+      grpTop.addEventListener('change', async (e) => {
+        try {
+          await setAwsActiveGroup(e.target.value);
+          toast('当前操作账号已切换为：' + e.target.value, 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
   } catch (e) {
     view.innerHTML = `
       <div class="page-head"><h1>实例</h1></div>
@@ -1114,8 +1207,8 @@ async function renderInstances() {
 /* ============================================================
    视图：实例详情（信息 + 防火墙规则编辑）
    ============================================================ */
-async function loadDetail(name, region) {
-  const data = await callAWS('GetInstance', { instanceName: name }, region);
+async function loadDetail(name, region, group) {
+  const data = await callAWS('GetInstance', { instanceName: name }, region, group);
   return data.instance;
 }
 
@@ -1137,7 +1230,7 @@ function portRowHTML(inst, idx) {
       <td><input class="input mono wide" data-edit-field="cidrs" value="${esc(cidrText)}" placeholder="0.0.0.0/0, ::/0"></td>
       <td><span class="state-pill open">待保存</span></td>
       <td><div class="row-actions">
-        <button class="btn btn-accent btn-sm" data-action="save-port" data-idx="${idx}" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}">保存</button>
+        <button class="btn btn-accent btn-sm" data-action="save-port" data-idx="${idx}" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" data-group="${esc(state.detail.group || '')}">保存</button>
         <button class="btn btn-ghost btn-sm" data-action="cancel-edit-port" data-idx="${idx}">取消</button>
       </div></td>
     </tr>`;
@@ -1178,12 +1271,12 @@ function renderPortsSection(inst) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
           添加规则
         </button>
-        <button class="btn btn-accent btn-sm" data-action="save-all-ports" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}">
+        <button class="btn btn-accent btn-sm" data-action="save-all-ports" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" data-group="${esc(state.detail.group || '')}">
           保存全部修改
         </button>
         <span style="flex:1"></span>
-        <button class="btn btn-sm" data-action="open-all-v4" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" title="TCP+UDP 0-65535 + ICMP，来源 0.0.0.0/0">一键开放全部 IPv4 端口</button>
-        <button class="btn btn-sm" data-action="open-all-v6" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" title="TCP+UDP 0-65535 + ICMP，来源 ::/0">一键开放全部 IPv6 端口</button>
+        <button class="btn btn-sm" data-action="open-all-v4" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" data-group="${esc(state.detail.group || '')}" title="TCP+UDP 0-65535 + ICMP，来源 0.0.0.0/0">一键开放全部 IPv4 端口</button>
+        <button class="btn btn-sm" data-action="open-all-v6" data-name="${esc(inst.name)}" data-region="${esc(state.detail.region)}" data-group="${esc(state.detail.group || '')}" title="TCP+UDP 0-65535 + ICMP，来源 ::/0">一键开放全部 IPv6 端口</button>
       </div>
     </div>
     <div class="section">
@@ -1315,12 +1408,12 @@ function renderDetailHTML(inst) {
   `;
 }
 
-async function renderInstanceDetail(name, region) {
+async function renderInstanceDetail(name, region, group) {
   const view = $('#view');
-  state.detail = { name, region, ports: [], editingIdx: -1, _inst: null };
+  state.detail = { name, region, group: group || '', ports: [], editingIdx: -1, _inst: null };
   view.innerHTML = `<div class="empty"><div class="spinner" style="margin:0 auto"></div></div>`;
   try {
-    const inst = await withBusy(() => loadDetail(name, region));
+    const inst = await withBusy(() => loadDetail(name, region, group));
     state.detail.ports = ((inst.networking && inst.networking.ports) || []).map(p => ({
       fromPort: p.fromPort, toPort: p.toPort, protocol: p.protocol,
       cidrs: p.cidrs || undefined, ipv6Cidrs: p.ipv6Cidrs || undefined, cidrListAliases: p.cidrListAliases || undefined
@@ -1361,6 +1454,7 @@ function blueprintLabel(b) { return `${b.name || b.blueprintId}${b.version ? ' '
 
 function renderCreateView() {
   const view = $('#view');
+  const cfgC = getCreds() || {};
   view.innerHTML = `
     <div class="page-head">
       <div>
@@ -1369,13 +1463,21 @@ function renderCreateView() {
       </div>
     </div>
 
+    ${(cfgC.accounts || []).length > 1 ? `
+    <div class="notice" style="max-width:760px">
+      <b>创建账号：${esc(cfgC.active || '')}</b>（AK …${esc(cfgC.accessKeyIdTail || '')}）—— 新开的机器将属于该账号。如需用其他账号创建，先到「实例」页顶部切换当前操作账号。
+    </div>` : (cfgC.configured ? `
+    <div class="notice" style="max-width:760px">
+      <b>创建账号：${esc(cfgC.active || '')}</b>（AK …${esc(cfgC.accessKeyIdTail || '')}）
+    </div>` : '')}
+
     <div class="form-card">
       <div class="form-grid">
         <div class="field full">
           <label>从现有实例复制（可选）</label>
           <select class="input" id="create-template">
             <option value="">— 全新创建，不复制 —</option>
-            ${(state.instances || []).map(i => `<option value="${esc(i.name)}" data-region="${esc(i._region || '')}">${esc(i.name)}（${esc(i._region || '')}）</option>`).join('')}
+            ${(state.instances || []).map(i => `<option value="${esc(i.name)}" data-region="${esc(i._region || '')}" data-group="${esc(i._group || '')}">${esc(i.name)}（${esc(i._region || '')}${i._group ? ' · ' + esc(i._group) : ''}）</option>`).join('')}
           </select>
           <div class="hint">选择后会带入该实例的区域 / 系统 / 套餐 / 密钥，可再修改</div>
         </div>
@@ -1605,7 +1707,7 @@ async function renderSettings() {
 
     ${c.configured ? `
       <div class="notice" style="max-width:640px">
-        当前已配置：AK 尾号 <b>…${esc(c.accessKeyIdTail || '')}</b> · 区域 <b>${esc(c.region || '')}</b>
+        当前凭证组：<b>${esc(c.active || '')}</b> · AK 尾号 <b>…${esc(c.accessKeyIdTail || '')}</b> · 区域 <b>${esc(c.region || '')}</b>
       </div>` : ''}
 
     ${legacy ? `
@@ -1619,8 +1721,23 @@ async function renderSettings() {
       </div>` : ''}
 
     <div class="form-card" style="max-width:640px">
-      <h3>AWS 凭证</h3>
+      <h3>AWS 凭证（支持多个账号）</h3>
+      <div class="field full" style="margin-bottom:12px">
+        <label>当前凭证组</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select class="input" id="set-group" style="flex:1;min-width:180px">
+            ${(c.accounts || []).map(g => `<option value="${esc(g.name)}" ${g.name === c.active ? 'selected' : ''}>${esc(g.name)}${g.region ? ' · ' + esc(g.region) : ''}${g.accessKeyIdTail ? ' · …' + esc(g.accessKeyIdTail) : ''}</option>`).join('')}
+          </select>
+          <button class="btn btn-ghost" id="set-group-new" type="button">＋ 新建组</button>
+          ${c.configured ? '<button class="btn btn-danger" id="set-group-del" type="button">删除当前组</button>' : ''}
+        </div>
+        <div class="tip" style="margin-top:6px">切换下拉即切换当前使用的 AWS 账号；每组凭证独立保存。编辑已有组时 AK/SK 留空 = 保持不变。</div>
+      </div>
       <div class="form-grid">
+        <div class="field full">
+          <label>凭证组名称 <span class="tip">（填新名字保存 = 新建一组；与现有组同名 = 更新该组）</span></label>
+          <input class="input" id="set-name" value="${esc(c.active || '')}" placeholder="如：美西-A、公司生产" autocomplete="off" spellcheck="false">
+        </div>
         <div class="field full">
           <label>Access Key ID</label>
           <input class="input mono" id="set-ak" placeholder="AKIA..." autocomplete="off" spellcheck="false">
@@ -1680,14 +1797,18 @@ async function renderSettings() {
   });
 
   const save = async (test) => {
+    const name = $('#set-name').value.trim();
     const ak = $('#set-ak').value.trim();
     const sk = $('#set-sk').value.trim();
     const region = $('#set-region').value;
-    if (!ak || !sk) { toast('请填写 Access Key 和 Secret Key', 'err'); return; }
+    if (!name) { toast('请填写凭证组名称', 'err'); return; }
+    const cur = getCreds() || {};
+    const isNew = !(cur.accounts || []).some(g => g.name === name);
+    if (isNew && (!ak || !sk)) { toast('新凭证组必须填写 Access Key 和 Secret Key', 'err'); return; }
     const box = $('#set-result');
     box.innerHTML = `<div class="empty" style="padding:20px"><div class="spinner" style="margin:0 auto"></div></div>`;
     try {
-      await saveCredsToServer({ accessKeyId: ak, secretAccessKey: sk, region });
+      await saveCredsToServer({ action: 'save', name, accessKeyId: ak, secretAccessKey: sk, region, makeActive: true });
     } catch (e) {
       box.innerHTML = errorBox('保存失败：' + e.message);
       toast('保存失败', 'err');
@@ -1706,7 +1827,8 @@ async function renderSettings() {
       box.innerHTML = `<div class="notice" style="margin:0">已保存到本机文件 aws-credentials.json。</div>`;
       toast('凭证已保存到本机', 'ok');
     }
-    updateCredsBadge();
+    renderSettings();
+    loadInstances();
   };
   $('#set-save').addEventListener('click', () => save(false));
   $('#set-save-test').addEventListener('click', () => save(true));
@@ -1724,6 +1846,48 @@ async function renderSettings() {
             toast('凭证已清除', 'ok');
           } catch (e) { toast('清除失败：' + e.message, 'err'); }
           renderSettings();
+          loadInstances();
+        }
+      });
+    });
+  }
+  const grpSel = $('#set-group');
+  if (grpSel) {
+    grpSel.addEventListener('change', async (e) => {
+      try {
+        await setAwsActiveGroup(e.target.value);
+        toast('已切换到凭证组：' + e.target.value, 'ok');
+      } catch (err) { toast(err.message, 'err'); }
+      renderSettings();
+      loadInstances();
+    });
+  }
+  const grpNew = $('#set-group-new');
+  if (grpNew) {
+    grpNew.addEventListener('click', () => {
+      $('#set-name').value = '';
+      $('#set-ak').value = '';
+      $('#set-sk').value = '';
+      $('#set-name').focus();
+      toast('填写新组名和凭证后保存，即新建一组', 'ok');
+    });
+  }
+  const grpDel = $('#set-group-del');
+  if (grpDel) {
+    grpDel.addEventListener('click', () => {
+      const name = (getCreds() || {}).active || '';
+      confirmDialog({
+        title: '删除凭证组',
+        message: '确定删除凭证组「' + name + '」吗？删除后不可恢复。',
+        confirmText: '删除',
+        danger: true,
+        onConfirm: async () => {
+          try {
+            await deleteAwsGroup(name);
+            toast('已删除凭证组', 'ok');
+          } catch (e) { toast('删除失败：' + e.message, 'err'); }
+          renderSettings();
+          loadInstances();
         }
       });
     });
@@ -1778,7 +1942,7 @@ function resizeSSH() {
   }
 }
 
-async function openSSH(name, region) {
+async function openSSH(name, region, group) {
   const root = $('#modal-root');
   root.innerHTML = `
     <div class="modal-mask" data-close="1"></div>
@@ -1801,7 +1965,7 @@ async function openSSH(name, region) {
 
   let access;
   try {
-    const data = await callAWS('GetInstanceAccessDetails', { instanceName: name, protocol: 'ssh' }, region);
+    const data = await callAWS('GetInstanceAccessDetails', { instanceName: name, protocol: 'ssh' }, region, group);
     access = (data && data.accessDetails) || null;
   } catch (e) {
     setSshStatus('获取访问凭证失败：' + e.message, 'error');
@@ -1887,7 +2051,7 @@ const POWER_OPS = {
   reboot: { api: 'RebootInstance', title: '重启', verb: '重启', warn: true }
 };
 
-function doPowerAction(action, name, region) {
+function doPowerAction(action, name, region, group) {
   const op = POWER_OPS[action];
   if (!op) return;
   confirmDialog({
@@ -1897,7 +2061,7 @@ function doPowerAction(action, name, region) {
     danger: op.warn,
     onConfirm: async () => {
       try {
-        await withBusy(() => callAWS(op.api, { instanceName: name }, region));
+        await withBusy(() => callAWS(op.api, { instanceName: name }, region, group));
         toast(op.title + '请求已提交（状态同步可能需要 30–60 秒）', 'ok');
         setTimeout(() => render(), 1200);
       } catch (e) {
@@ -1907,7 +2071,7 @@ function doPowerAction(action, name, region) {
   });
 }
 
-function doDeleteInstance(name, region) {
+function doDeleteInstance(name, region, group) {
   confirmDialog({
     title: '删除实例',
     message: `将<strong style="color:var(--danger)">永久删除</strong>实例 <b>${esc(name)}</b>（区域 ${esc(region)}）。<br><br>删除后<strong>不可恢复</strong>：公网 IP 将被释放、磁盘数据全部丢失、绑定的静态 IP 也会被一并删除。确定要继续吗？`,
@@ -1915,7 +2079,7 @@ function doDeleteInstance(name, region) {
     danger: true,
     onConfirm: async () => {
       try {
-        await withBusy(() => callAWS('DeleteInstance', { instanceName: name }, region));
+        await withBusy(() => callAWS('DeleteInstance', { instanceName: name }, region, group));
         toast('删除指令已提交，正在删除实例…', 'ok');
         setTimeout(() => { location.hash = '#/instances'; render(); }, 1500);
       } catch (e) {
@@ -1950,7 +2114,7 @@ function mergePortRules(existing, added) {
   }
   return out;
 }
-function doOpenAllPorts(name, region, kind) {
+function doOpenAllPorts(name, region, kind, group) {
   const v4 = kind === 'v4';
   const label = v4 ? '全部 IPv4' : '全部 IPv6';
   const cidr = v4 ? '0.0.0.0/0（所有 IPv4）' : '::/0（所有 IPv6）';
@@ -1963,9 +2127,9 @@ function doOpenAllPorts(name, region, kind) {
       try {
         const existing = state.detail.ports || [];
         const merged = mergePortRules(existing, buildAllPortRules(v4));
-        await withBusy(() => callAWS('PutInstancePublicPorts', { instanceName: name, portInfos: merged }, region));
+        await withBusy(() => callAWS('PutInstancePublicPorts', { instanceName: name, portInfos: merged }, region, group));
         toast('已提交：开放' + label + '端口（30–60 秒生效）', 'ok');
-        setTimeout(() => renderInstanceDetail(name, region), 1500);
+        setTimeout(() => renderInstanceDetail(name, region, group), 1500);
       } catch (e) {
         toast('操作失败：' + e.message, 'err');
       }
@@ -1975,7 +2139,7 @@ function doOpenAllPorts(name, region, kind) {
 
 /* 实时监控已移除：Lightsail 官方指标非实时（分钟级延迟），用户确认无意义后删除 */
 
-function doOpenPort(instanceName, region) {
+function doOpenPort(instanceName, region, group) {
   const protocol = $('#port-protocol').value;
   let from = parseInt($('#port-from').value, 10);
   let to = parseInt($('#port-to').value, 10);
@@ -1993,7 +2157,7 @@ function doOpenPort(instanceName, region) {
     confirmText: '开放',
     onConfirm: async () => {
       try {
-        await withBusy(() => callAWS('OpenInstancePublicPorts', { instanceName, portInfo }, region));
+        await withBusy(() => callAWS('OpenInstancePublicPorts', { instanceName, portInfo }, region, group));
         toast('端口已开放', 'ok');
         setTimeout(() => render(), 900);
       } catch (e) { toast('开放端口失败：' + e.message, 'err'); }
@@ -2001,7 +2165,7 @@ function doOpenPort(instanceName, region) {
   });
 }
 
-function doSaveAllPorts(instanceName, region) {
+function doSaveAllPorts(instanceName, region, group) {
   const portInfos = state.detail.ports.map(p => {
     const info = { fromPort: p.fromPort, toPort: p.toPort, protocol: p.protocol };
     if (p.cidrs && p.cidrs.length) info.cidrs = p.cidrs;
@@ -2046,7 +2210,7 @@ function doCancelEditPort() {
   renderInstanceDetailView();
 }
 
-function doSavePort(idx, instanceName, region) {
+function doSavePort(idx, instanceName, region, group) {
   const edited = collectEditedRow();
   if (!edited) { toast('未找到编辑中的规则', 'err'); return; }
   if (edited.protocol !== 'icmp') {
@@ -2099,7 +2263,7 @@ async function render() {
   updateCredsBadge();
 
   if (path === 'instances') await renderInstances();
-  else if (path === 'instance') await renderInstanceDetail(params.get('name'), params.get('region') || (getCreds() && getCreds().region));
+  else if (path === 'instance') await renderInstanceDetail(params.get('name'), params.get('region') || (getCreds() && getCreds().region), params.get('group') || '');
   else if (path === 'create') await renderCreate();
   else if (path === 'settings') await renderSettings();
   else location.hash = '#/instances';
@@ -2116,22 +2280,22 @@ document.addEventListener('click', (e) => {
   }
   const trigger = e.target.closest('[data-action]');
   if (!trigger) return;
-  const { action, name, region, idx } = trigger.dataset;
+  const { action, name, region, group, idx } = trigger.dataset;
   if (action === 'open-instance') {
-    location.hash = '#/instance?name=' + encodeURIComponent(name) + '&region=' + encodeURIComponent(region || (getCreds() && getCreds().region));
+    location.hash = '#/instance?name=' + encodeURIComponent(name) + '&region=' + encodeURIComponent(region || (getCreds() && getCreds().region)) + '&group=' + encodeURIComponent(group || '');
   }
-  else if (action === 'ssh') openSSH(name, region);
-  else if (action === 'start' || action === 'stop' || action === 'reboot') doPowerAction(action, name, region);
-  else if (action === 'delete') doDeleteInstance(name, region);
-  else if (action === 'open-all-v4') doOpenAllPorts(name, region, 'v4');
-  else if (action === 'open-all-v6') doOpenAllPorts(name, region, 'v6');
-  else if (action === 'open-port') doOpenPort(name, region);
+  else if (action === 'ssh') openSSH(name, region, group);
+  else if (action === 'start' || action === 'stop' || action === 'reboot') doPowerAction(action, name, region, group);
+  else if (action === 'delete') doDeleteInstance(name, region, group);
+  else if (action === 'open-all-v4') doOpenAllPorts(name, region, group, 'v4');
+  else if (action === 'open-all-v6') doOpenAllPorts(name, region, group, 'v6');
+  else if (action === 'open-port') doOpenPort(name, region, group);
   else if (action === 'edit-port') doEditPort(parseInt(idx, 10));
   else if (action === 'cancel-edit-port') doCancelEditPort();
-  else if (action === 'save-port') doSavePort(parseInt(idx, 10), name, region);
+  else if (action === 'save-port') doSavePort(parseInt(idx, 10), name, region, group);
   else if (action === 'add-port') doAddPort();
   else if (action === 'remove-port') doRemovePort(parseInt(idx, 10));
-  else if (action === 'save-all-ports') doSaveAllPorts(name, region);
+  else if (action === 'save-all-ports') doSaveAllPorts(name, region, group);
 });
 
 $('#btn-refresh').addEventListener('click', () => render());
@@ -2224,14 +2388,44 @@ window.OciPanel = (function () {
     el.classList.remove('hidden');
   }
 
+  var groups = [];
+  function updateAccountCount() {
+    var el = $q('#oci-account-count');
+    if (el) el.textContent = groups.length ? (groups.length + ' 个账号 · ' + instances.length + ' 台') : '';
+  }
   async function loadInstances(silent) {
     try {
-      var data = await api('/instances');
-      instances = data.instances || [];
+      var d = await api('/config');
+      var accounts = (d && d.accounts) || [];
+      if (!accounts.length) {
+        instances = []; groups = [];
+        updateAccountCount();
+        renderInstances();
+        showListMsg('尚未配置 OCI 凭证，请先到「设置」填写并保存。');
+        return;
+      }
+      var gs = [];
+      var all = [];
+      for (var i = 0; i < accounts.length; i++) {
+        var g = accounts[i];
+        try {
+          var dd = await api('/instances?group=' + encodeURIComponent(g.name));
+          var its = (dd.instances || []).map(function (x) { x._group = g.name; return x; });
+          gs.push({ name: g.name, region: g.region || '', instances: its });
+          all = all.concat(its);
+        } catch (e) {
+          gs.push({ name: g.name, region: g.region || '', instances: [], error: e.message });
+        }
+      }
+      groups = gs;
+      instances = all;
       $q('#oci-list-msg').classList.add('hidden');
+      updateAccountCount();
       renderInstances();
     } catch (e) {
       instances = [];
+      groups = [];
+      updateAccountCount();
       renderInstances();
       var msg = /配置|凭证/.test(e.message) ? '尚未配置 API 凭证，请先到「设置」填写并保存。' : '加载失败：' + e.message;
       if (!silent) ociToast(msg, true);
@@ -2239,38 +2433,54 @@ window.OciPanel = (function () {
     }
   }
 
+  function groupRowsHtml() {
+    var html = '';
+    groups.forEach(function (g) {
+      html += '<tr class="oci-grp-sep"><td colspan="7"><span class="oci-grp-name">☁ ' + escO(g.name) + '</span>' +
+        (g.region ? ' · <span class="oci-grp-meta">' + escO(g.region) + '</span>' : '') +
+        ' · <span class="count-badge" style="font-size:11px">' + g.instances.length + ' 台</span>' +
+        (g.error ? ' · <span style="color:var(--warn);font-size:12px">读取失败：' + escO(g.error) + '</span>' : '') + '</td></tr>';
+      if (!g.instances.length) {
+        html += '<tr class="oci-grp-empty"><td colspan="7">该账号下没有实例' + (g.error ? '（' + escO(g.error) + '）' : '') + '</td></tr>';
+        return;
+      }
+      g.instances.forEach(function (it) {
+        var busy = busyIds.has(it.id);
+        var running = it.state === 'RUNNING';
+        var grpAttr = ' data-group="' + escO(g.name) + '"';
+        var start = running ? '' : '<button class="btn btn-sm" data-act="start" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>开机</button>';
+        var stop = running ? '<button class="btn btn-sm" data-act="stop" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>关机</button>' : '';
+        var reboot = running ? '<button class="btn btn-sm" data-act="reboot" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>重启</button>' : '';
+        var swip = '<button class="btn btn-sm" data-act="switch-ip" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>切换 IP</button>';
+        var ports = '<button class="btn btn-sm btn-danger" data-act="open-ports" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>开放端口</button>';
+        var rules = '<button class="btn btn-sm" data-act="rules" data-id="' + it.id + '"' + grpAttr + (busy ? ' disabled' : '') + '>规则</button>';
+        var spec = it.ocpus != null ? (it.ocpus + ' OCPU / ' + it.memory_in_gbs + ' GB') : escO(it.shape);
+        html += '<tr>' +
+          '<td><div class="inst-name">' + escO(it.display_name) + '</div><div class="inst-sub">' + escO(it.shape) + '</div></td>' +
+          '<td>' + stateBadge(it.state) + '</td>' +
+          '<td>' + spec + '</td>' +
+          '<td>' + escO(it.public_ip || '—') + '</td>' +
+          '<td>' + escO(it.private_ip || '—') + '</td>' +
+          '<td>' + ((it.ipv6 || []).map(escO).join('<br>') || '—') + '</td>' +
+          '<td class="ops">' + start + stop + reboot + swip + ports + rules + '</td>' +
+          '</tr>';
+      });
+    });
+    return html;
+  }
+
   function renderInstances() {
     var tbody = $q('#oci-inst-body');
-    if (!instances.length) { tbody.innerHTML = ''; return; }
     $q('#oci-list-msg').classList.add('hidden');
-    tbody.innerHTML = instances.map(function (it) {
-      var busy = busyIds.has(it.id);
-      var running = it.state === 'RUNNING';
-      var start = running ? '' : '<button class="btn btn-sm" data-act="start" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>开机</button>';
-      var stop = running ? '<button class="btn btn-sm" data-act="stop" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>关机</button>' : '';
-      var reboot = running ? '<button class="btn btn-sm" data-act="reboot" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>重启</button>' : '';
-      var swip = '<button class="btn btn-sm" data-act="switch-ip" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>切换 IP</button>';
-      var ports = '<button class="btn btn-sm btn-danger" data-act="open-ports" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>开放端口</button>';
-      var rules = '<button class="btn btn-sm" data-act="rules" data-id="' + it.id + '"' + (busy ? ' disabled' : '') + '>规则</button>';
-      var spec = it.ocpus != null ? (it.ocpus + ' OCPU / ' + it.memory_in_gbs + ' GB') : escO(it.shape);
-      return '<tr>' +
-        '<td><div class="inst-name">' + escO(it.display_name) + '</div><div class="inst-sub">' + escO(it.shape) + '</div></td>' +
-        '<td>' + stateBadge(it.state) + '</td>' +
-        '<td>' + spec + '</td>' +
-        '<td>' + escO(it.public_ip || '—') + '</td>' +
-        '<td>' + escO(it.private_ip || '—') + '</td>' +
-        '<td>' + ((it.ipv6 || []).map(escO).join('<br>') || '—') + '</td>' +
-        '<td class="ops">' + start + stop + reboot + swip + ports + rules + '</td>' +
-        '</tr>';
-    }).join('');
+    tbody.innerHTML = groupRowsHtml();
   }
 
   function setBusy(id, val) { if (val) busyIds.add(id); else busyIds.delete(id); renderInstances(); }
 
-  async function doAction(id, action, label) {
+  async function doAction(id, action, label, group) {
     setBusy(id, true);
     try {
-      await api('/instances/' + encodeURIComponent(id) + '/action', { method: 'POST', body: JSON.stringify({ action: action }) });
+      await api('/instances/' + encodeURIComponent(id) + '/action?group=' + encodeURIComponent(group || ''), { method: 'POST', body: JSON.stringify({ action: action }) });
       ociToast('已触发' + label + '，正在生效…');
       setTimeout(function () { loadInstances(true); }, 3000);
     } catch (e) {
@@ -2290,7 +2500,7 @@ window.OciPanel = (function () {
       danger: true,
       onConfirm: function () {
         setBusy(id, true);
-        api('/instances/' + encodeURIComponent(id) + '/switch-ip', { method: 'POST' })
+        api('/instances/' + encodeURIComponent(id) + '/switch-ip?group=' + encodeURIComponent((inst && inst._group) || ''), { method: 'POST' })
           .then(function (d) { ociToast(d.message || '更换成功'); })
           .catch(function (e) { ociToast(e.message, true); })
           .finally(function () { setBusy(id, false); setTimeout(function () { loadInstances(true); }, 2000); });
@@ -2349,7 +2559,7 @@ window.OciPanel = (function () {
         : '确定要为「' + (inst ? inst.display_name : '') + '」开放以下端口？\n协议 ' + body.protocol + ' / 端口 ' + (body.ports || '不限') + ' / ' + (body.direction === 'INGRESS' ? '来源' : '目标') + ' ' + body.source;
       if (!window.confirm(warn)) return;
       setBusy(id, true);
-      api('/instances/' + encodeURIComponent(id) + '/open-ports', { method: 'POST', body: JSON.stringify(body) })
+      api('/instances/' + encodeURIComponent(id) + '/open-ports?group=' + encodeURIComponent((inst && inst._group) || ''), { method: 'POST', body: JSON.stringify(body) })
         .then(function (d) { ociToast(d.message || '已完成'); closeModalRoot(); })
         .catch(function (e) { ociToast(e.message, true); })
         .finally(function () { setBusy(id, false); });
@@ -2392,7 +2602,7 @@ window.OciPanel = (function () {
       '<div class="actions"><button class="btn" data-close="1">关闭</button></div>' +
       '</div>';
     root.classList.add('show');
-    api('/instances/' + encodeURIComponent(id) + '/rules')
+    api('/instances/' + encodeURIComponent(id) + '/rules?group=' + encodeURIComponent((inst && inst._group) || ''))
       .then(function (d) { root.querySelector('#oci-rules-body').innerHTML = renderRules(d); })
       .catch(function (e) { root.querySelector('#oci-rules-body').innerHTML = '<p class="oci-tip">加载失败：' + escO(e.message) + '</p>'; });
   }
@@ -2403,10 +2613,11 @@ window.OciPanel = (function () {
     if (!btn || btn.disabled) return;
     var act = btn.dataset.act;
     var id = btn.dataset.id;
+    var group = btn.dataset.group || '';
     var inst = instances.find(function (i) { return i.id === id; });
-    if (act === 'start') doAction(id, 'START', '开机');
-    else if (act === 'stop') doAction(id, 'SOFTSTOP', '关机');
-    else if (act === 'reboot') doAction(id, 'SOFTRESET', '重启');
+    if (act === 'start') doAction(id, 'START', '开机', group);
+    else if (act === 'stop') doAction(id, 'SOFTSTOP', '关机', group);
+    else if (act === 'reboot') doAction(id, 'SOFTRESET', '重启', group);
     else if (act === 'switch-ip') doSwitchIp(id, inst);
     else if (act === 'open-ports') openPortsModal(id, inst);
     else if (act === 'rules') doRules(id, inst);
@@ -2417,6 +2628,22 @@ window.OciPanel = (function () {
   async function loadSettings() {
     try {
       var d = await api('/config');
+      var sel = $q('#oci-group');
+      if (sel) {
+        sel.innerHTML = (d.accounts || []).map(function (g) {
+          return '<option value="' + escO(g.name) + '"' + (g.name === d.active ? ' selected' : '') + '>' + escO(g.name) + (g.region ? ' · ' + escO(g.region) : '') + '</option>';
+        }).join('');
+        var del = $q('#oci-group-del');
+        if (del) del.style.display = (d.accounts || []).length ? '' : 'none';
+        var top = $q('#oci-group-top');
+        if (top) {
+          top.innerHTML = sel.innerHTML;
+          top.style.display = (d.accounts || []).length > 1 ? '' : 'none';
+          top.value = d.active || '';
+        }
+      }
+      var nameEl = $q('#oci-group-name');
+      if (nameEl && d.active) nameEl.value = d.active;
       Object.keys(FIELD_MAP).forEach(function (idKey) {
         var el = $q('#' + idKey);
         if (el) el.value = d[FIELD_MAP[idKey]] || '';
@@ -2435,7 +2662,10 @@ window.OciPanel = (function () {
   }
 
   $q('#oci-btn-save').addEventListener('click', async function () {
+    var name = $q('#oci-group-name').value.trim();
+    if (!name) { ociToast('请填写凭证组名称', true); return; }
     var body = {
+      action: 'save', name: name, makeActive: true,
       tenancy_ocid: $q('#oci-tenancy').value.trim(),
       user_ocid: $q('#oci-user').value.trim(),
       fingerprint: $q('#oci-fingerprint').value.trim(),
@@ -2454,6 +2684,57 @@ window.OciPanel = (function () {
       ociToast(e.message, true);
     }
   });
+
+  var grpSel = $q('#oci-group');
+  if (grpSel) {
+    grpSel.addEventListener('change', async function () {
+      try {
+        await api('/config', { method: 'POST', body: JSON.stringify({ action: 'set-active', name: grpSel.value }) });
+        ociToast('已切换凭证组：' + grpSel.value);
+      } catch (e) { ociToast(e.message, true); }
+      loadSettings();
+      loadInstances(true);
+    });
+  }
+  $q('#oci-group-new').addEventListener('click', function () {
+    $q('#oci-group-name').value = '';
+    $q('#oci-tenancy').value = '';
+    $q('#oci-user').value = '';
+    $q('#oci-fingerprint').value = '';
+    $q('#oci-region').value = '';
+    $q('#oci-key-file').value = '';
+    $q('#oci-key-content').value = '';
+    $q('#oci-group-name').focus();
+    ociToast('填写新组名和凭证后保存，即新建一组');
+  });
+  $q('#oci-group-del').addEventListener('click', function () {
+    var name = grpSel.value;
+    confirmDialog({
+      title: '删除凭证组',
+      message: '确定删除凭证组「' + name + '」吗？删除后不可恢复。',
+      confirmText: '删除',
+      danger: true,
+      onConfirm: async function () {
+        try {
+          await api('/config', { method: 'POST', body: JSON.stringify({ action: 'delete', name: name }) });
+          ociToast('已删除凭证组');
+        } catch (e) { ociToast(e.message, true); }
+        loadSettings();
+        loadInstances(true);
+      }
+    });
+  });
+  var grpTop = $q('#oci-group-top');
+  if (grpTop) {
+    grpTop.addEventListener('change', async function () {
+      try {
+        await api('/config', { method: 'POST', body: JSON.stringify({ action: 'set-active', name: grpTop.value }) });
+        ociToast('已切换凭证组：' + grpTop.value);
+      } catch (e) { ociToast(e.message, true); }
+      loadSettings();
+      loadInstances(true);
+    });
+  }
 
   async function testConnection() {
     try {
