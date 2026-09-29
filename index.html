@@ -2482,14 +2482,18 @@ function doDeleteInstance(name, region, group) {
 
 /* 一键开放全部 IPv4 / IPv6 端口（TCP+UDP 0-65535 + ICMP），与现有规则合并去重后覆盖写入 */
 function buildAllPortRules(v4) {
+  // 注意：AWS Lightsail 的 ICMP 规则只支持 IPv4 CIDR（IPv6 会被拒绝），
+  // 因此「开放全部 IPv6」时只开 TCP + UDP，不带 ICMP。
   const base = [
     { protocol: 'tcp', fromPort: 0, toPort: 65535 },
     { protocol: 'udp', fromPort: 0, toPort: 65535 },
-    { protocol: 'icmp', fromPort: -1, toPort: -1 }
+    ...(v4 ? [{ protocol: 'icmp', fromPort: -1, toPort: -1 }] : [])
   ];
   return base.map(r => v4 ? { ...r, cidrs: ['0.0.0.0/0'] } : { ...r, ipv6Cidrs: ['::/0'] });
 }
 function mergePortRules(existing, added) {
+  // 过滤非法规则：ICMP 不允许带 IPv6 CIDR（AWS 会拒绝）
+  existing = existing.filter(r => !(r.protocol === 'icmp' && (r.ipv6Cidrs || []).length > 0));
   const key = (r) => {
     const c = (r.cidrs || []).join(',');
     const v6 = (r.ipv6Cidrs || []).join(',');
