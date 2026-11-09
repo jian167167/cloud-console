@@ -624,7 +624,6 @@ select.input { cursor: pointer; }
                     </div>
         </div>
       </div>
-    </div>
 
   <!-- ===== 谷歌云 GCP 视图 ===== -->
   <div class="oci-view" id="gcp-view">
@@ -2755,6 +2754,12 @@ function renderInstanceDetailView() {
    ============================================================ */
 async function render() {
   const { path, params } = parseHash();
+  if (path === 'gcp' || path === 'gcp-settings') {
+    $('#topbar-title').textContent = path === 'gcp-settings' ? '谷歌云设置' : '谷歌云 GCP';
+    $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === path));
+    updateCredsBadge();
+    return;
+  }
   if (path === 'oci' || path === 'oci-settings') {
     $('#topbar-title').textContent = '甲骨文 OCI';
     $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.nav === path));
