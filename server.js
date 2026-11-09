@@ -47,11 +47,12 @@ const ROOT = __dirname;
 const LEGACY_CREDS_FILE = process.env.CREDS_FILE || path.join(ROOT, 'aws-credentials.json');
 const LEGACY_OCI_FILE = process.env.OCI_CREDS_FILE || path.join(ROOT, 'oci-credentials.json');
 // 数据目录：账号库 / 会话 / 按账号隔离的凭证都存这里（容器部署时挂 /data）
-const APP_VERSION = '202609292031'; // 每次发布更新：YYYYMMDDHHMM
+const APP_VERSION = '202611100042'; // 每次发布更新：YYYYMMDDHHMM
 const DATA_DIR = process.env.DATA_DIR || (process.env.CREDS_FILE ? path.dirname(process.env.CREDS_FILE) : ROOT);
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const ociBackend = require('./oci');
+const gcpBackend = require('./gcp');
 const tgNotify = require('./telegram');
 tgNotify.setDataDir(DATA_DIR);
 
@@ -106,6 +107,7 @@ function isValidUsername(u) { return /^[a-zA-Z0-9_-]{3,32}$/.test(u); }
 function userDir(user) { return path.join(DATA_DIR, 'users', user); }
 function userAwsFile(user) { return path.join(userDir(user), 'aws-credentials.json'); }
 function userOciFile(user) { return path.join(userDir(user), 'oci-credentials.json'); }
+function userGcpFile(user) { return path.join(userDir(user), 'gcp-credentials.json'); }
 
 /** 注册新账号时自动继承旧版全局凭证（AWS / OCI），避免重新配置一遍。
  *  迁移成功后把旧文件重命名为 .migrated，只允许首个账号继承一次。 */
@@ -687,9 +689,11 @@ const server = http.createServer((req, res) => {
     const awsFile = path.join(dir, 'aws-credentials.json');
     const ociFile = path.join(dir, 'oci-credentials.json');
     const tgFile = path.join(dir, 'telegram.json');
+    const gcpFile = path.join(dir, 'gcp-credentials.json');
     if (fs.existsSync(awsFile)) { try { acc.aws = readJsonFile(awsFile, null); } catch (e) { acc.aws = null; } }
     if (fs.existsSync(ociFile)) { try { acc.oci = readJsonFile(ociFile, null); } catch (e) { acc.oci = null; } }
     if (fs.existsSync(tgFile)) { try { acc.telegram = readJsonFile(tgFile, null); } catch (e) { acc.telegram = null; } }
+    if (fs.existsSync(gcpFile)) { try { acc.gcp = readJsonFile(gcpFile, null); } catch (e) { acc.gcp = null; } }
     opLog(req.user, '导出数据备份（当前账号）');
     return sendJson(res, 200, {
       app: 'cloud-console',
@@ -726,8 +730,9 @@ const server = http.createServer((req, res) => {
         if (acc.aws != null) { writeJsonFile(path.join(dir, 'aws-credentials.json'), acc.aws); n++; }
         if (acc.oci != null) { writeJsonFile(path.join(dir, 'oci-credentials.json'), acc.oci); n++; }
         if (acc.telegram != null) { writeJsonFile(path.join(dir, 'telegram.json'), acc.telegram); n++; }
+        if (acc.gcp != null) { writeJsonFile(path.join(dir, 'gcp-credentials.json'), acc.gcp); n++; }
         opLog(req.user, '恢复数据备份（当前账号）：' + n + ' 组配置');
-        return sendJson(res, 200, { ok: true, message: '恢复成功：当前账号 ' + n + ' 组配置（AWS/甲骨文/电报）' });
+        return sendJson(res, 200, { ok: true, message: '恢复成功：当前账号 ' + n + ' 组配置（AWS/甲骨文/谷歌云/电报）' });
       } catch (e) {
         return sendJson(res, 500, { error: '恢复失败：' + e.message });
       }
@@ -894,6 +899,13 @@ const server = http.createServer((req, res) => {
     ociBackend.setCredsFile(userOciFile(req.user));
     opLog(req.user, 'OCI ' + req.method + ' ' + urlPath);
     return ociBackend.handle(req, res, urlPath, req.method, sendJson, isAllowedHost);
+  }
+
+  // ---- GCP 面板 API（谷歌云，纯 Node 实现）----
+  if (urlPath.startsWith('/api/gcp')) {
+    gcpBackend.setCredsFile(userGcpFile(req.user));
+    opLog(req.user, 'GCP ' + req.method + ' ' + urlPath);
+    return gcpBackend.handle(req, res, urlPath, req.method, sendJson, isAllowedHost);
   }
 
   let filePath = urlPath === '/' ? path.join(ROOT, 'index.html') : path.join(ROOT, urlPath);

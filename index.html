@@ -482,6 +482,17 @@ select.input { cursor: pointer; }
           甲骨文设置
         </a>
       </div>
+      <div class="nav-group" style="margin-top:6px">
+        <div class="nav-group-title">谷歌云 GCP</div>
+        <a class="nav-item" data-nav="gcp" href="#/gcp">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><circle cx="12" cy="12" r="4"/></svg>
+          实例
+        </a>
+        <a class="nav-item" data-nav="gcp-settings" href="#/gcp-settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          谷歌云设置
+        </a>
+      </div>
     </nav>
     <div class="nav" style="margin-top:2px">
       <a class="nav-item" id="nav-telegram" href="javascript:void(0)" title="Telegram 操作通知（实例操作 / 面板登录提醒）">
@@ -614,6 +625,82 @@ select.input { cursor: pointer; }
         </div>
       </div>
     </div>
+
+  <!-- ===== 谷歌云 GCP 视图 ===== -->
+  <div class="oci-view" id="gcp-view">
+    <div class="oci-wrap">
+      <div id="gcp-view-instances">
+        <div class="oci-toolbar">
+          <h2>实例列表 <span id="gcp-account-count" class="sub" style="font-size:12px;color:var(--text-3)"></span></h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label class="oci-auto"><input type="checkbox" id="gcp-auto-refresh"> 自动刷新（5 秒）</label>
+            <button class="btn btn-sm" id="gcp-btn-refresh">刷新</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>名称</th><th>状态</th><th>区域</th><th>机型</th><th>公网 IPv4</th><th>IPv6</th><th>操作</th></tr>
+            </thead>
+            <tbody id="gcp-inst-body"></tbody>
+          </table>
+        </div>
+        <div id="gcp-list-msg" class="empty" style="margin-top:14px">加载中…</div>
+      </div>
+
+      <div id="gcp-view-settings" class="hidden">
+        <div class="form-card">
+          <h3>谷歌云 API 设置（支持多个账号）</h3>
+          <div class="field full" style="margin-bottom:12px">
+            <label>当前凭证</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <select class="input" id="gcp-group" style="flex:1;min-width:180px"></select>
+              <button type="button" id="gcp-group-new" class="btn btn-ghost">＋ 新建凭证</button>
+              <button type="button" id="gcp-group-del" class="btn btn-danger" style="display:none">删除当前凭证</button>
+            </div>
+            <div class="oci-tip" style="margin-top:6px">切换下拉即切换当前使用的谷歌云账号；编辑已有凭证时 Service Account JSON / SSH 私钥留空 = 保持不变。</div>
+          </div>
+          <div class="field full" style="margin-bottom:4px">
+            <label>凭证名称 <span class="oci-tip">（填新名字保存 = 新建一个凭证；与现有凭证同名 = 更新该凭证）</span></label>
+            <input id="gcp-group-name" type="text" placeholder="如：谷歌云A、谷歌云B" autocomplete="off">
+          </div>
+          <p class="oci-tip">粘贴 Google Cloud 服务账号密钥（Service Account JSON）。凭证仅保存在服务器本地文件中，不会上传到任何地方。</p>
+          <details class="oci-help">
+            <summary>如何获取 Service Account JSON？（点击展开）</summary>
+            <ol>
+              <li>打开 Google Cloud Console → 选择项目 → 左侧「IAM 与管理」→「服务账号」。</li>
+              <li>新建服务账号（或选现有）→ 授予 <b>Compute 管理员</b>（Compute Instance Admin + 网络相关权限）角色。</li>
+              <li>点该服务账号 →「密钥」→「添加密钥」→「创建新密钥」→ 选 <b>JSON</b> 类型 → 下载 JSON 文件。</li>
+              <li>把 JSON 文件全部内容粘贴到下方「Service Account JSON」。</li>
+              <li>项目需已启用 <b>Compute Engine API</b>（API 与服务 → 启用）。</li>
+            </ol>
+          </details>
+          <div class="form-grid">
+            <label>项目 ID（可留空，自动从 JSON 读取）
+              <input id="gcp-project-id" type="text" placeholder="my-project-123456" autocomplete="off">
+            </label>
+            <label>SSH 用户名（在线 SSH 用）
+              <input id="gcp-ssh-user" type="text" placeholder="ubuntu（Debian/Ubuntu 常见）" autocomplete="off">
+            </label>
+          </div>
+          <label class="oci-keylabel">Service Account JSON
+            <textarea id="gcp-service-json" rows="7" placeholder='{"type":"service_account","project_id":"...","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----
+...","client_email":"..."}'></textarea>
+          </label>
+          <label class="oci-keylabel">SSH 私钥（在线 SSH 用，可留空）
+            <textarea id="gcp-ssh-key" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...与实例 authorized_keys 对应的私钥..."></textarea>
+          </label>
+          <div id="gcp-key-hint" class="oci-tip"></div>
+          <div class="form-actions">
+            <button id="gcp-btn-save" class="btn btn-accent">保存设置</button>
+            <button id="gcp-btn-test" class="btn">测试连接</button>
+            <button id="gcp-btn-clear" class="btn btn-danger">清除凭证</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   </main>
 </div>
 
@@ -970,17 +1057,35 @@ var Auth = (function () {
     if (p === 'settings') return 'settings';
     if (p === 'oci-settings') return 'oci-settings';
     if (p === 'oci') return 'oci';
+    if (p === 'gcp-settings') return 'gcp-settings';
+    if (p === 'gcp') return 'gcp';
     return 'instances';
   }
   function applyPanel(nav) {
     var view = document.getElementById('view');
     var oci = document.getElementById('oci-view');
+    var gcp = document.getElementById('gcp-view');
     if (!view || !oci) return;
     var isOci = (nav === 'oci' || nav === 'oci-settings');
+    var isGcp = (nav === 'gcp' || nav === 'gcp-settings');
     $$('.nav-item').forEach(function (x) {
       if (x.dataset.nav) x.classList.toggle('active', x.dataset.nav === nav);
     });
     var tb = document.getElementById('topbar-title');
+    if (isGcp) {
+      view.style.display = 'none';
+      oci.classList.remove('show');
+      if (gcp) gcp.classList.add('show');
+      if (tb) tb.textContent = nav === 'gcp-settings' ? '谷歌云设置' : '谷歌云 GCP';
+      var gvi = document.getElementById('gcp-view-instances');
+      var gvs = document.getElementById('gcp-view-settings');
+      var tabG = nav === 'gcp-settings' ? 'settings' : 'instances';
+      if (gvi) gvi.classList.toggle('hidden', tabG !== 'instances');
+      if (gvs) gvs.classList.toggle('hidden', tabG !== 'settings');
+      if (window.GcpPanel && typeof window.GcpPanel.onShow === 'function') window.GcpPanel.onShow();
+      return;
+    }
+    if (gcp) gcp.classList.remove('show');
     if (isOci) {
       view.style.display = 'none';
       oci.classList.add('show');
@@ -3219,6 +3324,434 @@ window.OciPanel = (function () {
     }
   };
 })();
+/* ============================================================
+   谷歌云 GCP 面板（实例 / 设置 / 在线 SSH）
+   ============================================================ */
+window.GcpPanel = (function () {
+  'use strict';
+  var instances = [];
+  var groups = [];
+  var busyIds = new Set();
+  var refreshTimer = null;
+  var inited = false;
+
+  function $q(s) { return document.querySelector(s); }
+  function escG(v) { return esc(v); }
+  function gToast(msg, isErr) { toast(msg, isErr ? 'error' : 'info'); }
+
+  async function api(path, opts) {
+    var res;
+    try {
+      res = await fetch('/api/gcp' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    } catch (e) {
+      throw new Error('无法连接服务，请确认后端已启动');
+    }
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (data && data.ok === false) throw new Error(data.message || '操作失败');
+    if (!data) throw new Error('服务返回异常（HTTP ' + res.status + '）');
+    return data;
+  }
+
+  var STATE_MAP = {
+    RUNNING: ['running', '运行中'],
+    TERMINATED: ['stopped', '已停止'],
+    STOPPED: ['stopped', '已停止'],
+    STOPPING: ['pending', '停止中'],
+    STARTING: ['pending', '启动中'],
+    STAGING: ['pending', '准备中'],
+    REPAIRING: ['pending', '修复中'],
+    SUSPENDING: ['pending', '挂起中'],
+    SUSPENDED: ['stopped', '已挂起']
+  };
+  function stateBadge(st) {
+    var m = STATE_MAP[st] || ['unknown', st];
+    return '<span class="inst-state ' + m[0] + '">' + escG(m[1]) + '</span>';
+  }
+  function showMsg(t) { var el = $q('#gcp-list-msg'); if (el) { el.textContent = t; el.classList.remove('hidden'); } }
+  function hideMsg() { var el = $q('#gcp-list-msg'); if (el) el.classList.add('hidden'); }
+  function updateCount() {
+    var el = $q('#gcp-account-count');
+    if (el) el.textContent = groups.length ? (groups.length + ' 个账号 · ' + instances.length + ' 台') : '';
+  }
+
+  async function loadInstances(silent) {
+    try {
+      var d = await api('/config');
+      var accounts = (d && d.accounts) || [];
+      if (!accounts.length) {
+        instances = []; groups = [];
+        updateCount(); render();
+        showMsg('尚未配置谷歌云凭证，请先到「谷歌云设置」粘贴 Service Account JSON 并保存。');
+        return;
+      }
+      var gs = []; var all = [];
+      for (var i = 0; i < accounts.length; i++) {
+        var g = accounts[i];
+        try {
+          var dd = await api('/instances?group=' + encodeURIComponent(g.name));
+          var its = (dd.instances || []).map(function (x) { x._group = g.name; x._project = dd.project; return x; });
+          gs.push({ name: g.name, project: dd.project || g.project_id || '', instances: its });
+          all = all.concat(its);
+        } catch (e) {
+          gs.push({ name: g.name, project: g.project_id || '', instances: [], error: e.message });
+        }
+      }
+      groups = gs; instances = all;
+      hideMsg(); updateCount(); render();
+    } catch (e) {
+      instances = []; groups = [];
+      var msg = /配置|凭证/.test(e.message) ? '尚未配置谷歌云凭证，请先到「谷歌云设置」填写。' : '加载失败：' + e.message;
+      if (!silent) gToast(msg, true);
+      showMsg(msg); updateCount(); render();
+    }
+  }
+
+  function rowsHtml() {
+    var html = '';
+    groups.forEach(function (g) {
+      html += '<tr class="oci-grp-sep"><td colspan="7"><span class="oci-grp-name">☁ ' + escG(g.name) + '</span>' +
+        (g.project ? ' · <span class="oci-grp-meta">' + escG(g.project) + '</span>' : '') +
+        ' · <span class="count-badge" style="font-size:11px">' + g.instances.length + ' 台</span>' +
+        (g.error ? ' · <span style="color:var(--warn);font-size:12px">读取失败：' + escG(g.error) + '</span>' : '') +
+        '</td></tr>';
+      if (!g.instances.length) {
+        html += '<tr class="oci-grp-empty"><td colspan="7">该账号下没有实例' + (g.error ? '（' + escG(g.error) + '）' : '') + '</td></tr>';
+        return;
+      }
+      g.instances.forEach(function (it) {
+        var key = it.name + '|' + it.zone;
+        var busy = busyIds.has(key);
+        var grpAttr = ' data-group="' + escG(g.name) + '" data-zone="' + escG(it.zone) + '"';
+        var running = it.status === 'RUNNING';
+        var stopped = it.status === 'TERMINATED' || it.status === 'STOPPED';
+        var startBtn = stopped ? '<button class="btn btn-sm" data-act="start" data-name="' + escG(it.name) + '"' + grpAttr + (busy ? ' disabled' : '') + '>开机</button>' : '';
+        var stopBtn = running ? '<button class="btn btn-sm" data-act="stop" data-name="' + escG(it.name) + '"' + grpAttr + (busy ? ' disabled' : '') + '>停止</button>' : '';
+        var rebootBtn = running ? '<button class="btn btn-sm" data-act="reset" data-name="' + escG(it.name) + '"' + grpAttr + (busy ? ' disabled' : '') + '>重启</button>' : '';
+        var swBtn = it.external_ip ? '<button class="btn btn-sm" data-act="switch-ip" data-name="' + escG(it.name) + '"' + grpAttr + (busy ? ' disabled' : '') + '>换 IP</button>' : '';
+        var sshBtn = (running && it.external_ip) ? '<button class="btn btn-sm btn-accent" data-act="ssh" data-name="' + escG(it.name) + '"' + grpAttr + '>SSH</button>' : '';
+        html += '<tr>' +
+          '<td><div class="inst-name">' + escG(it.name) + '</div><div class="inst-sub">' + escG(it.zone) + '</div></td>' +
+          '<td>' + stateBadge(it.status) + '</td>' +
+          '<td>' + escG(it.region || '—') + '</td>' +
+          '<td>' + escG(it.machine_type || '—') + '</td>' +
+          '<td><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' + escG(it.external_ip || '—') +
+            (it.external_ip ? '<button class="btn btn-sm btn-ghost" data-act="copy" data-ip="' + escG(it.external_ip) + '" title="复制 IPv4">复制</button>' : '') + '</div></td>' +
+          '<td>' + (it.ipv6 ? escG(it.ipv6) + '<button class="btn btn-sm btn-ghost" data-act="copy" data-ip="' + escG(it.ipv6) + '" title="复制 IPv6">复制</button>' : '—') + '</td>' +
+          '<td class="ops">' + startBtn + stopBtn + rebootBtn + swBtn + sshBtn + '</td>' +
+          '</tr>';
+      });
+    });
+    return html;
+  }
+
+  function render() { var tb = $q('#gcp-inst-body'); if (tb) tb.innerHTML = rowsHtml(); }
+  function setBusy(key, val) { if (val) busyIds.add(key); else busyIds.delete(key); render(); }
+
+  function doAction(name, zone, group, action, label) {
+    var warn = '';
+    if (action === 'stop') warn = '<br><br><span style="color:var(--warn)">停止后实例不可访问；GCP 停机实例不收取计算费用（磁盘仍保留）。</span>';
+    if (action === 'reset') warn = '<br><br>GCP 没有「平滑重启」，这里执行的是 <b>reset 硬重启</b>（相当于强制断电重启），未保存的数据可能丢失，约 1–2 分钟恢复。';
+    confirmDialog({
+      title: label + '实例',
+      message: '确定要' + label + '实例 <b>' + escG(name) + '</b>（' + escG(zone) + '）吗？' + warn,
+      confirmText: label,
+      danger: action !== 'start',
+      onConfirm: async function () {
+        var key = name + '|' + zone;
+        setBusy(key, true);
+        try {
+          await api('/instances/' + encodeURIComponent(name) + '/action?group=' + encodeURIComponent(group), {
+            method: 'POST',
+            body: JSON.stringify({ zone: zone, action: action })
+          });
+          gToast(label + '请求已提交，正在生效…', false);
+          setTimeout(function () { loadInstances(true); }, 4000);
+        } catch (e) {
+          gToast(label + '失败：' + e.message, true);
+          loadInstances(true);
+        } finally {
+          setBusy(key, false);
+        }
+      }
+    });
+  }
+
+  function doSwitchIp(name, zone, group) {
+    confirmDialog({
+      title: '更换外部 IPv4',
+      message: '将更换实例 <b>' + escG(name) + '</b>（' + escG(zone) + '）的外部 IPv4 地址。<br><br>' +
+        '若当前地址是<b>静态（预留）IP</b>，面板会同时<b>释放该静态地址</b>，避免它留在项目里继续按小时计费；<br>' +
+        '若为临时 IP，旧地址会自动回收，不产生费用。',
+      confirmText: '更换 IP',
+      danger: false,
+      onConfirm: async function () {
+        var key = name + '|' + zone;
+        setBusy(key, true);
+        try {
+          var r = await api('/instances/' + encodeURIComponent(name) + '/switch-ip?group=' + encodeURIComponent(group), {
+            method: 'POST',
+            body: JSON.stringify({ zone: zone })
+          });
+          gToast('更换成功：' + (r.old_ip || '—') + ' → ' + (r.new_ip || '（分配中，稍后刷新）') +
+            (r.released_static ? '（旧静态地址已释放，不再计费）' : ''), false);
+          setTimeout(function () { loadInstances(true); }, 2000);
+        } catch (e) {
+          gToast('更换 IP 失败：' + e.message, true);
+        } finally {
+          setBusy(key, false);
+        }
+      }
+    });
+  }
+
+  async function openGcpSSH(name, zone, group) {
+    var root = $q('#modal-root');
+    root.innerHTML = '<div class="modal-mask" data-close="1"></div>' +
+      '<div class="modal ssh-modal" role="dialog" aria-modal="true">' +
+      '<div class="ssh-head"><div><strong>在线 SSH · 谷歌云</strong><span class="ssh-sub" id="ssh-status">正在获取连接信息…</span></div>' +
+      '<div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" id="ssh-resize" title="重新适配终端尺寸">适配</button>' +
+      '<button class="btn btn-ghost btn-sm" data-close="1">关闭</button></div></div>' +
+      '<div class="ssh-body"><div id="ssh-terminal"></div></div></div>';
+    root.classList.add('show');
+    root.querySelectorAll('[data-close]').forEach(function (el) { el.addEventListener('click', closeSSH); });
+    var rz = $q('#ssh-resize');
+    if (rz) rz.addEventListener('click', resizeSSH);
+
+    var info;
+    try {
+      info = await api('/instances/' + encodeURIComponent(name) + '/ssh-info?zone=' + encodeURIComponent(zone) + '&group=' + encodeURIComponent(group));
+    } catch (e) {
+      setSshStatus('获取连接信息失败：' + e.message, 'error');
+      return;
+    }
+    if (!info || !info.host) {
+      setSshStatus((info && info.message) || '该实例没有公网 IP，无法连接', 'error');
+      return;
+    }
+    var host = info.host;
+    var username = info.username || 'ubuntu';
+    sshState.host = host;
+    sshState.username = username;
+    setSshStatus('正在连接 ' + username + '@' + host + ' …');
+
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'ui-monospace, Consolas, "Courier New", monospace',
+      theme: { background: '#0b0f14', foreground: '#d8e0e8', cursor: '#ff9900', selectionBackground: '#2c5275' },
+      scrollback: 5000
+    });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    sshState.term = term;
+    sshState.fit = fit;
+    term.open(document.getElementById('ssh-terminal'));
+    try { fit.fit(); } catch (e) { /* noop */ }
+
+    var ws;
+    try { ws = new WebSocket(getWsUrl()); }
+    catch (e) { setSshStatus('无法创建 WebSocket 连接', 'error'); return; }
+    sshState.ws = ws;
+
+    ws.onopen = function () {
+      var dims = { cols: 80, rows: 24 };
+      try { var pDim = fit.proposeDimensions(); if (pDim) dims = pDim; } catch (e) { /* noop */ }
+      ws.send(JSON.stringify({
+        type: 'connect',
+        host: host,
+        port: info.port || 22,
+        username: username,
+        privateKey: info.privateKey,
+        certKey: '',
+        term: 'xterm-256color',
+        cols: dims.cols,
+        rows: dims.rows
+      }));
+    };
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'connected') setSshStatus('已连接，正在打开 shell…');
+      else if (msg.type === 'shell-ready') setSshStatus('已连接 ' + username + '@' + host, 'connected');
+      else if (msg.type === 'data') { try { term.write(msg.data); } catch (e) { /* noop */ } }
+      else if (msg.type === 'error') setSshStatus(msg.message + ' ｜ 私钥格式：' + keyDiag(info.privateKey), 'error');
+      else if (msg.type === 'exit') setSshStatus('连接已关闭', 'error');
+    };
+    ws.onclose = function () { sshState.ws = null; setSshStatus('连接已关闭', 'error'); };
+    ws.onerror = function () { setSshStatus('WebSocket 连接失败，请确认后端在运行', 'error'); };
+
+    term.onData(function (data) {
+      if (sshState.ws && sshState.ws.readyState === WebSocket.OPEN) {
+        sshState.ws.send(JSON.stringify({ type: 'data', data: data }));
+      }
+    });
+    window.addEventListener('resize', resizeSSH);
+    setTimeout(resizeSSH, 200);
+  }
+
+  /* ---------- 设置 ---------- */
+  async function loadSettings() {
+    try {
+      var d = await api('/config');
+      var sel = $q('#gcp-group');
+      if (sel) {
+        sel.innerHTML = (d.accounts || []).map(function (g) {
+          return '<option value="' + escG(g.name) + '"' + (g.name === d.active ? ' selected' : '') + '>' +
+            escG(g.name) + (g.project_id ? ' · ' + escG(g.project_id) : '') + '</option>';
+        }).join('');
+        var del = $q('#gcp-group-del');
+        if (del) del.style.display = (d.accounts || []).length ? '' : 'none';
+      }
+      var nameEl = $q('#gcp-group-name');
+      if (nameEl && d.active) nameEl.value = d.active;
+      var pid = $q('#gcp-project-id');
+      if (pid) {
+        var actGrp = (d.accounts || []).filter(function (g) { return g.name === d.active; })[0];
+        pid.value = (actGrp && actGrp.project_id) || d.project_id || '';
+      }
+      var sshu = $q('#gcp-ssh-user'); if (sshu) sshu.value = d.ssh_user || '';
+      var hint = $q('#gcp-key-hint');
+      if (hint) {
+        hint.textContent = (d.has_service_json ? '✅ 已保存 Service Account JSON（出于安全不回显，重新粘贴将覆盖）。' : '') +
+          (d.has_ssh_key ? '  ✅ 已保存 SSH 私钥。' : '');
+      }
+      var sj = $q('#gcp-service-json');
+      if (sj) sj.placeholder = d.has_service_json ? '（已保存 Service Account JSON，重新粘贴将覆盖）' : '%7B%22type%22%3A%22service_account%22%2C...%7D';
+    } catch (e) {
+      gToast(e.message, true);
+    }
+  }
+
+  var saveBtn = $q('#gcp-btn-save');
+  if (saveBtn) saveBtn.addEventListener('click', async function () {
+    var nameEl = $q('#gcp-group-name');
+    var name = nameEl ? nameEl.value.trim() : '';
+    if (!name) { gToast('请填写凭证名称', true); return; }
+    var body = {
+      action: 'save', name: name, makeActive: true,
+      project_id: $q('#gcp-project-id') ? $q('#gcp-project-id').value.trim() : '',
+      service_json: $q('#gcp-service-json') ? $q('#gcp-service-json').value : '',
+      ssh_user: $q('#gcp-ssh-user') ? $q('#gcp-ssh-user').value.trim() : '',
+      ssh_key: $q('#gcp-ssh-key') ? $q('#gcp-ssh-key').value : ''
+    };
+    try {
+      var d = await api('/config', { method: 'POST', body: JSON.stringify(body) });
+      gToast(d.message || '已保存', false);
+      if ($q('#gcp-service-json')) $q('#gcp-service-json').value = '';
+      if ($q('#gcp-ssh-key')) $q('#gcp-ssh-key').value = '';
+      await loadSettings();
+      loadInstances(true);
+    } catch (e) {
+      gToast(e.message, true);
+    }
+  });
+
+  var grpSel = $q('#gcp-group');
+  if (grpSel) grpSel.addEventListener('change', async function () {
+    try {
+      await api('/config', { method: 'POST', body: JSON.stringify({ action: 'set-active', name: grpSel.value }) });
+      gToast('已切换凭证组：' + grpSel.value, false);
+    } catch (e) { gToast(e.message, true); }
+    loadSettings();
+    loadInstances(true);
+  });
+
+  var newBtn = $q('#gcp-group-new');
+  if (newBtn) newBtn.addEventListener('click', function () {
+    ['#gcp-group-name', '#gcp-project-id', '#gcp-ssh-user', '#gcp-service-json', '#gcp-ssh-key'].forEach(function (id) {
+      var el = $q(id); if (el) el.value = '';
+    });
+    var n = $q('#gcp-group-name'); if (n) n.focus();
+    gToast('填写新凭证名和 Service Account JSON 后保存，即新建一个凭证', false);
+  });
+
+  var delBtn = $q('#gcp-group-del');
+  if (delBtn) delBtn.addEventListener('click', function () {
+    var nm = grpSel ? grpSel.value : '';
+    confirmDialog({
+      title: '删除凭证',
+      message: '确定删除当前凭证「' + nm + '」吗？删除后不可恢复。',
+      confirmText: '删除',
+      danger: true,
+      onConfirm: async function () {
+        try { await api('/config', { method: 'POST', body: JSON.stringify({ action: 'delete', name: nm }) }); gToast('已删除当前凭证', false); }
+        catch (e) { gToast(e.message, true); }
+        loadSettings(); loadInstances(true);
+      }
+    });
+  });
+
+  var testBtn = $q('#gcp-btn-test');
+  if (testBtn) testBtn.addEventListener('click', async function () {
+    try { var d = await api('/test', { method: 'POST' }); gToast(d.message, false); }
+    catch (e) { gToast(e.message, true); }
+  });
+
+  var clearBtn = $q('#gcp-btn-clear');
+  if (clearBtn) clearBtn.addEventListener('click', function () {
+    confirmDialog({
+      title: '清除谷歌云凭证',
+      message: '确定要清除服务器上保存的全部谷歌云凭证吗？清除后需重新填写才能管理实例。',
+      confirmText: '清除',
+      danger: true,
+      onConfirm: async function () {
+        try { await api('/config', { method: 'POST', body: JSON.stringify({ clear: true }) }); gToast('已清除', false); }
+        catch (e) { gToast(e.message, true); }
+        loadSettings(); loadInstances(true);
+      }
+    });
+  });
+
+  var btnRefresh = $q('#gcp-btn-refresh');
+  if (btnRefresh) btnRefresh.addEventListener('click', function () { loadInstances(); });
+
+  var tbody = $q('#gcp-inst-body');
+  if (tbody) tbody.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    var act = btn.getAttribute('data-act');
+    var nm = btn.getAttribute('data-name');
+    var zone = btn.getAttribute('data-zone');
+    var grp = btn.getAttribute('data-group');
+    if (act === 'copy') {
+      var ip = btn.getAttribute('data-ip');
+      if (ip) copyText(ip).then(function (ok) { toast(ok ? '已复制：' + ip : '复制失败，请手动选择', ok ? 'ok' : 'err'); });
+      return;
+    }
+    if (act === 'start') return doAction(nm, zone, grp, 'start', '开机');
+    if (act === 'stop') return doAction(nm, zone, grp, 'stop', '停止');
+    if (act === 'reset') return doAction(nm, zone, grp, 'reset', '重启');
+    if (act === 'switch-ip') return doSwitchIp(nm, zone, grp);
+    if (act === 'ssh') return openGcpSSH(nm, zone, grp);
+  });
+
+  function startTimer() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(function () { loadInstances(true); }, 5000);
+  }
+  function stopTimer() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
+
+  var auto = $q('#gcp-auto-refresh');
+  if (auto) auto.addEventListener('change', function () { if (auto.checked) startTimer(); else stopTimer(); });
+
+  function init() {
+    if (inited) return;
+    inited = true;
+    loadSettings();
+    loadInstances();
+    var a = $q('#gcp-auto-refresh');
+    if (a && a.checked) startTimer();
+  }
+
+  return {
+    onShow: function () {
+      if (!inited) init();
+      else { loadSettings(); loadInstances(true); }
+    }
+  };
+})();
+
 </script>
 </body>
 </html>
